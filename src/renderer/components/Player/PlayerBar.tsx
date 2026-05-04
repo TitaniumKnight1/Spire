@@ -1,4 +1,5 @@
 import { type ChangeEvent, type CSSProperties, type ReactElement, useCallback, useState } from "react";
+import type { EqPreset } from "@shared/library-types";
 import { usePlayer, SPEED_CYCLE_SEQUENCE } from "../../hooks/usePlayer.js";
 import { usePlayerStore } from "../../store/playerStore.js";
 import { formatDuration } from "../../utils/formatDuration.js";
@@ -14,6 +15,8 @@ export function PlayerBar(): ReactElement | null {
     addBookmark,
     setSleepTimer,
     clearSleepTimer,
+    toggleSkipSilence,
+    setEqPresetAndPersist,
   } = usePlayer();
 
   const currentBook = usePlayerStore((s) => s.currentBook);
@@ -28,12 +31,28 @@ export function PlayerBar(): ReactElement | null {
   const setShowBookmarksPanel = usePlayerStore((s) => s.setShowBookmarksPanel);
 
   const [sleepOpen, setSleepOpen] = useState(false);
+  const [eqOpen, setEqOpen] = useState(false);
+
+  const skipSilenceEnabled = usePlayerStore((s) => s.skipSilenceEnabled);
+  const eqPreset = usePlayerStore((s) => s.eqPreset);
 
   const onSeekInput = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
       seekTo(Number(e.target.value));
     },
     [seekTo],
+  );
+
+  const onSkipSilence = useCallback(() => {
+    void toggleSkipSilence();
+  }, [toggleSkipSilence]);
+
+  const applyEq = useCallback(
+    (p: EqPreset) => {
+      void setEqPresetAndPersist(p);
+      setEqOpen(false);
+    },
+    [setEqPresetAndPersist],
   );
 
   const onBookmark = useCallback(() => {
@@ -153,6 +172,74 @@ export function PlayerBar(): ReactElement | null {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+        <button
+          type="button"
+          onClick={onSkipSilence}
+          style={{
+            ...iconBtn,
+            borderColor: skipSilenceEnabled ? "#4a7a4a" : "#333",
+            background: skipSilenceEnabled ? "#1a2a18" : "#1c1c1c",
+          }}
+          title="Skip silence"
+        >
+          Skip ∅
+        </button>
+
+        <div style={{ position: "relative" }}>
+          <button
+            type="button"
+            onClick={() => setEqOpen((o) => !o)}
+            style={{
+              ...iconBtn,
+              borderColor: eqPreset !== "flat" ? "#4a6a9a" : "#333",
+              background: eqPreset !== "flat" ? "#1a1e2a" : "#1c1c1c",
+            }}
+            title="EQ preset"
+          >
+            EQ
+          </button>
+          {eqOpen ? (
+            <div
+              role="menu"
+              style={{
+                position: "absolute",
+                bottom: "100%",
+                right: 0,
+                marginBottom: 8,
+                background: "#1e1e1e",
+                border: "1px solid #333",
+                borderRadius: 8,
+                padding: 8,
+                minWidth: 160,
+                boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>EQ preset</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {(
+                  [
+                    ["flat", "Flat"],
+                    ["voice-clarity", "Voice clarity"],
+                    ["bass-boost", "Bass boost"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    style={{
+                      ...menuBtn,
+                      background: eqPreset === id ? "#2a3550" : "transparent",
+                    }}
+                    onClick={() => applyEq(id)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
         <button type="button" onClick={() => cycleSpeed()} style={iconBtn} title="Playback speed">
           {speedLabel}
         </button>

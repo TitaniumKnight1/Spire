@@ -75,6 +75,53 @@ export type SleepTimerState = {
   endsAt?: number;
 };
 
+/** Equalizer preset id (persisted in settings). */
+export type EqPreset = "flat" | "voice-clarity" | "bass-boost";
+
+/** Single biquad stage for EQ presets (Web Audio API). */
+export type EqBand =
+  | { type: "highpass"; frequency: number; gain?: number }
+  | { type: "lowshelf"; frequency: number; gain: number }
+  | { type: "peaking"; frequency: number; gain: number; Q: number };
+
+/** Main → all renderers: compact playback UI state for mini-player + tray. */
+export type PlayerStatePushPayload = {
+  isPlaying: boolean;
+  title: string | null;
+  author: string | null;
+  /** Library cover URL or file URL string for `<img src>` / hydration. */
+  coverArtUrl: string | null;
+  position: number;
+  duration: number;
+};
+
+/** Keyboard shortcut map (Electron accelerator strings + Space/Arrow labels). */
+export type ShortcutMap = {
+  playPause: string;
+  nextChapter: string;
+  prevChapter: string;
+  nextFile: string;
+  prevFile: string;
+  seekForward30: string;
+  seekBack30: string;
+  speedUp: string;
+  speedDown: string;
+  toggleMiniPlayer: string;
+};
+
+export const DEFAULT_SHORTCUT_MAP: ShortcutMap = {
+  playPause: "Space",
+  nextChapter: "Right",
+  prevChapter: "Left",
+  nextFile: "Shift+Right",
+  prevFile: "Shift+Left",
+  seekForward30: "F",
+  seekBack30: "B",
+  speedUp: "Shift+.",
+  speedDown: "Shift+,",
+  toggleMiniPlayer: "CommandOrControl+M",
+};
+
 /** Snapshot of playback for UI (subset of store). */
 export type PlaybackState = {
   isPlaying: boolean;
@@ -123,6 +170,25 @@ export type LibraryIngestResult = {
   errors: string[];
   /** Set when new books are created or updated during ingest (best-effort). */
   bookIds: number[];
+  /** Book IDs created in this ingest (not appended-to-existing). */
+  newBookIds: number[];
+};
+
+/** Aggregated listening metrics (computed from `progress` + `books`). */
+export type ListeningStats = {
+  hoursThisWeek: number;
+  hoursThisMonth: number;
+  hoursAllTime: number;
+  booksCompleted: number;
+  booksInProgress: number;
+  avgPlaybackSpeed: number;
+  currentStreak: number;
+  longestStreak: number;
+};
+
+/** IPC payload for {@link IPC_CHANNELS.stats.GET_SUMMARY}. */
+export type StatsSummary = {
+  stats: ListeningStats;
 };
 
 export type LibraryDeleteResult = {

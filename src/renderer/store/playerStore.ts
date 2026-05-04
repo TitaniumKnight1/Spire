@@ -1,5 +1,12 @@
 import { create } from "zustand";
-import type { Bookmark, BookFileItem, BookListItem, Chapter, SleepTimerState } from "@shared/library-types";
+import type {
+  Bookmark,
+  BookFileItem,
+  BookListItem,
+  Chapter,
+  EqPreset,
+  SleepTimerState,
+} from "@shared/library-types";
 
 export type PlayerStoreState = {
   currentBook: BookListItem | null;
@@ -16,6 +23,8 @@ export type PlayerStoreState = {
   sleepTimer: SleepTimerState | null;
   showChapterPanel: boolean;
   showBookmarksPanel: boolean;
+  skipSilenceEnabled: boolean;
+  eqPreset: EqPreset;
   setBook: (
     book: BookListItem,
     files: BookFileItem[],
@@ -35,6 +44,9 @@ export type PlayerStoreState = {
   setCurrentChapterIndex: (index: number) => void;
   setShowChapterPanel: (show: boolean) => void;
   setShowBookmarksPanel: (show: boolean) => void;
+  setSkipSilenceEnabled: (enabled: boolean) => void;
+  toggleSkipSilence: () => void;
+  setEqPreset: (preset: EqPreset) => void;
   nextFile: () => void;
   prevFile: () => void;
 };
@@ -54,6 +66,8 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   sleepTimer: null,
   showChapterPanel: false,
   showBookmarksPanel: false,
+  skipSilenceEnabled: false,
+  eqPreset: "flat",
 
   setBook: (book, files, chapters, initialFileIndex, initialPosition, speed) => {
     const safeIndex = Math.max(0, Math.min(initialFileIndex, Math.max(0, files.length - 1)));
@@ -83,6 +97,9 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   setCurrentChapterIndex: (index) => set({ currentChapterIndex: index }),
   setShowChapterPanel: (show) => set({ showChapterPanel: show }),
   setShowBookmarksPanel: (show) => set({ showBookmarksPanel: show }),
+  setSkipSilenceEnabled: (enabled) => set({ skipSilenceEnabled: enabled }),
+  toggleSkipSilence: () => set((s) => ({ skipSilenceEnabled: !s.skipSilenceEnabled })),
+  setEqPreset: (preset) => set({ eqPreset: preset }),
 
   nextFile: () => {
     const { currentFileIndex, files } = get();

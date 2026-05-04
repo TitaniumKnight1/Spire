@@ -45,11 +45,32 @@ export const IPC_CHANNELS = {
     GET_BOOKMARKS: "spire:playback:get-bookmarks",
     ADD_BOOKMARK: "spire:playback:add-bookmark",
     DELETE_BOOKMARK: "spire:playback:delete-bookmark",
-    /** Main → renderer (not invoke). */
+    /** Main → renderer (not invoke). Media keys, tray, globals. */
     MEDIA_KEY: "spire:playback:media-key",
+    /** Main → all renderers (main window + mini-player). */
+    STATE_PUSH: "spire:playback:state-push",
+    TOGGLE_MINI_PLAYER: "spire:playback:toggle-mini-player",
+    MINI_PLAYER_COMMAND: "spire:playback:mini-player-command",
+    /** Renderer → main: fan-out {@link IPC_CHANNELS.playback.STATE_PUSH}. */
+    REPORT_STATE: "spire:playback:report-state",
   },
   settings: {
-    STUB: "spire:settings:stub",
+    GET_SHORTCUTS: "spire:settings:get-shortcuts",
+    SAVE_SHORTCUTS: "spire:settings:save-shortcuts",
+    GET_SKIP_SILENCE: "spire:settings:get-skip-silence",
+    SAVE_SKIP_SILENCE: "spire:settings:save-skip-silence",
+    GET_EQ_PRESET: "spire:settings:get-eq-preset",
+    SET_EQ_PRESET: "spire:settings:set-eq-preset",
+    GET_APP_INFO: "spire:settings:get-app-info",
+    GET_DEFAULT_SPEED: "spire:settings:get-default-speed",
+    SAVE_DEFAULT_SPEED: "spire:settings:save-default-speed",
+    GET_SLEEP_TIMER_DEFAULT: "spire:settings:get-sleep-timer-default",
+    SAVE_SLEEP_TIMER_DEFAULT: "spire:settings:save-sleep-timer-default",
+    GET_AUTO_FETCH_COVERS: "spire:settings:get-auto-fetch-covers",
+    SAVE_AUTO_FETCH_COVERS: "spire:settings:save-auto-fetch-covers",
+  },
+  stats: {
+    GET_SUMMARY: "spire:stats:get-summary",
   },
 } as const;
 
@@ -85,7 +106,23 @@ export const IPC_INVOKE_CHANNELS = [
   IPC_CHANNELS.playback.GET_BOOKMARKS,
   IPC_CHANNELS.playback.ADD_BOOKMARK,
   IPC_CHANNELS.playback.DELETE_BOOKMARK,
-  IPC_CHANNELS.settings.STUB,
+  IPC_CHANNELS.playback.TOGGLE_MINI_PLAYER,
+  IPC_CHANNELS.playback.MINI_PLAYER_COMMAND,
+  IPC_CHANNELS.playback.REPORT_STATE,
+  IPC_CHANNELS.settings.GET_SHORTCUTS,
+  IPC_CHANNELS.settings.SAVE_SHORTCUTS,
+  IPC_CHANNELS.settings.GET_SKIP_SILENCE,
+  IPC_CHANNELS.settings.SAVE_SKIP_SILENCE,
+  IPC_CHANNELS.settings.GET_EQ_PRESET,
+  IPC_CHANNELS.settings.SET_EQ_PRESET,
+  IPC_CHANNELS.settings.GET_APP_INFO,
+  IPC_CHANNELS.settings.GET_DEFAULT_SPEED,
+  IPC_CHANNELS.settings.SAVE_DEFAULT_SPEED,
+  IPC_CHANNELS.settings.GET_SLEEP_TIMER_DEFAULT,
+  IPC_CHANNELS.settings.SAVE_SLEEP_TIMER_DEFAULT,
+  IPC_CHANNELS.settings.GET_AUTO_FETCH_COVERS,
+  IPC_CHANNELS.settings.SAVE_AUTO_FETCH_COVERS,
+  IPC_CHANNELS.stats.GET_SUMMARY,
 ] as const;
 
 export type IpcInvokeChannel = (typeof IPC_INVOKE_CHANNELS)[number];

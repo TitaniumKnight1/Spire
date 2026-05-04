@@ -1,13 +1,13 @@
-import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactElement, useMemo, useState } from "react";
 import type { SavedPodcastFeed } from "@shared/library-types";
 import { Bookmarks, ChapterList, PlayerBar } from "./components/Player/index.js";
 import { LibraryView } from "./components/Library/index.js";
 import { DownloadHistory } from "./components/Downloads/DownloadHistory.js";
 import { DownloadQueue } from "./components/Downloads/DownloadQueue.js";
 import { EpisodeList, FeedList } from "./components/Podcasts/index.js";
+import { SettingsView } from "./components/Settings/SettingsView.js";
 import { useDownloads } from "./hooks/useDownloads.js";
 import { useIPC } from "./hooks/useIPC.js";
-import { useLibrary } from "./hooks/useLibrary.js";
 import { usePlayerStore } from "./store/playerStore.js";
 
 type NavKey = "library" | "downloads" | "podcasts" | "settings";
@@ -202,92 +202,8 @@ function Outlet({
   }
 
   if (active === "settings") {
-    return (
-      <div>
-        <h1 style={{ marginTop: 0, fontSize: 22 }}>Settings</h1>
-        <WatchFolderSettings />
-        <p style={{ color: "#666", fontSize: 13, marginTop: 24 }}>More preferences arrive in Milestone 8.</p>
-      </div>
-    );
+    return <SettingsView />;
   }
 
   return null;
-}
-
-function WatchFolderSettings(): ReactElement {
-  const { getWatchFolder, setWatchFolder, clearWatchFolder } = useLibrary();
-  const [path, setPath] = useState<string | null | undefined>(undefined);
-  const [busy, setBusy] = useState(false);
-
-  const refresh = useCallback(async () => {
-    const p = await getWatchFolder();
-    setPath(p);
-  }, [getWatchFolder]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  return (
-    <div
-      style={{
-        marginTop: 16,
-        padding: 16,
-        border: "1px solid #2a2a2a",
-        borderRadius: 12,
-        maxWidth: 560,
-        background: "#141414",
-      }}
-    >
-      <h2 style={{ marginTop: 0, fontSize: 16 }}>Watch folder</h2>
-      <p style={{ color: "#888", fontSize: 13, marginBottom: 12 }}>
-        New audio files dropped here are imported into the library automatically.
-      </p>
-      <div style={{ fontSize: 13, color: "#ccc", wordBreak: "break-all", marginBottom: 12 }}>
-        {path === undefined ? "Loading…" : path ?? "None"}
-      </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => {
-            setBusy(true);
-            void setWatchFolder()
-              .then((p) => setPath(p))
-              .finally(() => setBusy(false));
-          }}
-          style={{
-            padding: "8px 14px",
-            borderRadius: 8,
-            border: "1px solid #333",
-            background: "#1e1e1e",
-            color: "#e8e8e8",
-            cursor: busy ? "wait" : "pointer",
-          }}
-        >
-          Set folder…
-        </button>
-        <button
-          type="button"
-          disabled={busy || !path}
-          onClick={() => {
-            setBusy(true);
-            void clearWatchFolder()
-              .then(() => setPath(null))
-              .finally(() => setBusy(false));
-          }}
-          style={{
-            padding: "8px 14px",
-            borderRadius: 8,
-            border: "1px solid #522",
-            background: "#301818",
-            color: "#e88",
-            cursor: busy ? "wait" : "pointer",
-          }}
-        >
-          Clear
-        </button>
-      </div>
-    </div>
-  );
 }

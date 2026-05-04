@@ -33,7 +33,7 @@ export function useIPC(): {
   }, []);
 
   const pingDomain = useCallback(
-    (domain: "library" | "downloads" | "podcasts" | "settings") => {
+    (domain: "library" | "downloads" | "podcasts" | "settings"): Promise<IpcStubResult> => {
       if (domain === "library") {
         return Promise.resolve({ ok: true, domain: "library" as const });
       }
@@ -43,11 +43,10 @@ export function useIPC(): {
       if (domain === "podcasts") {
         return Promise.resolve({ ok: true, domain: "podcasts" as const });
       }
-      const channelMap = {
-        settings: IPC_CHANNELS.settings.STUB,
-      } as const satisfies Record<"settings", IpcInvokeChannel>;
-
-      return invoke<IpcStubResult>(channelMap[domain]);
+      return invoke(IPC_CHANNELS.settings.GET_SHORTCUTS).then(() => ({
+        ok: true,
+        domain: "settings" as const,
+      }));
     },
     [invoke],
   );

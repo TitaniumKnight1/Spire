@@ -1,6 +1,7 @@
 import { ipcMain } from "electron";
+import { broadcastPlayerState } from "../broadcast-state.js";
 import { IPC_CHANNELS } from "../../shared/ipc-channels.js";
-import type { Bookmark } from "../../shared/library-types.js";
+import type { Bookmark, PlayerStatePushPayload } from "../../shared/library-types.js";
 import {
   deleteBookmarkById,
   getBookById,
@@ -29,7 +30,32 @@ function asFiniteNumber(v: unknown): number | null {
   return null;
 }
 
-export function registerPlaybackIpc(): void {
+export type PlaybackIpcDeps = {
+  toggleMiniPlayer: () => { visible: boolean };
+  routeMiniPlayerCommand: (command: "play-pause" | "next" | "prev" | "close") => void;
+};
+
+export function registerPlaybackIpc(deps: PlaybackIpcDeps): void {
+  const { toggleMiniPlayer, routeMiniPlayerCommand } = deps;
+
+  ipcMain.handle(IPC_CHANNELS.playback.TOGGLE_MINI_PLAYER, async (): Promise<{ visible: boolean }> => {
+    return toggleMiniPlayer();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.playback.MINI_PLAYER_COMMAND, async (_event, payload: unknown): Promise<{ ok: boolean }> => {
+    const cmd = (payload as { command?: unknown }).command;
+    if (cmd === "play-pause" || cmd === "next" || cmd === "prev" || cmd === "close") {
+      routeMiniPlayerCommand(cmd);
+      return { ok: true };
+    }
+    return { ok: false };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.playback.REPORT_STATE, async (_event, payload: unknown): Promise<{ ok: boolean }> => {
+    broadcastPlayerState(payload as PlayerStatePushPayload);
+    return { ok: true };
+  });
+
   ipcMain.handle(IPC_CHANNELS.playback.SAVE_PROGRESS, async (_event, payload: unknown): Promise<{ ok: boolean }> => {
     const p = payload as SaveProgressPayload;
     const bookId = asFiniteNumber(p.book_id);

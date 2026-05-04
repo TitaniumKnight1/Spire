@@ -7,6 +7,7 @@ import {
   deleteBook as dbDeleteBook,
   filePathExists,
   getAllBooksWithProgress,
+  getAppSetting,
   getBookById,
   getChaptersByBook,
   getFilesByBook,
@@ -18,6 +19,7 @@ import {
   upsertFile,
   upsertProgress,
 } from "./database.js";
+import { SETTINGS_KEY_DEFAULT_SPEED } from "../ipc/settings.js";
 import { coverFileUrl, parseAudioFile, persistCoverArt, type ParsedAudioMetadata } from "./metadata.js";
 import type { BookDetailPayload, BookListItem } from "../../shared/library-types.js";
 
@@ -174,6 +176,20 @@ function nextTrackOrders(sorted: ParsedFile[], startIndex: number): number[] {
   });
 }
 
+function readDefaultPlaybackSpeedFromSettings(): number {
+  const raw = getAppSetting(SETTINGS_KEY_DEFAULT_SPEED);
+  if (raw == null || raw.trim() === "") {
+    return 1;
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    return 1;
+  }
+  const clamped = Math.min(3.5, Math.max(0.5, n));
+  const stepped = Math.round(clamped * 4) / 4;
+  return stepped;
+}
+
 async function createBookFromParsed(sorted: ParsedFile[]): Promise<number> {
   const agg = aggregateBookFields(sorted);
   const bookId = upsertBook({
@@ -201,7 +217,7 @@ async function createBookFromParsed(sorted: ParsedFile[]): Promise<number> {
     });
   }
 
-  upsertProgress({ book_id: bookId });
+  upsertProgress({ book_id: bookId, playback_speed: readDefaultPlaybackSpeedFromSettings() });
 
   const orders = nextTrackOrders(sorted, 0);
   for (let i = 0; i < sorted.length; i++) {
@@ -327,12 +343,14 @@ export async function ingestPaths(paths: string[]): Promise<{
   booksAdded: number;
   errors: string[];
   bookIds: number[];
+  newBookIds: number[];
 }> {
   const errors: string[] = [];
   const bookIds: number[] = [];
+  const newBookIds: number[] = [];
   const expanded = expandInputPaths(paths);
   if (expanded.length === 0) {
-    return { success: true, booksAdded: 0, errors, bookIds };
+    return { success: true, booksAdded: 0, errors, bookIds, newBookIds };
   }
 
   const clusters = clusterByParentDir(expanded);
@@ -360,10 +378,11 @@ export async function ingestPaths(paths: string[]): Promise<{
       const id = await createBookFromParsed(sorted);
       booksAdded += 1;
       bookIds.push(id);
+      newBookIds.push(id);
     }
   }
 
-  return { success: errors.length === 0, booksAdded, errors, bookIds };
+  return { success: errors.length === 0, booksAdded, errors, bookIds, newBookIds };
 }
 
 export function getLibrary(): BookListItem[] {

@@ -22,10 +22,12 @@ import {
 } from "../services/library.js";
 import {
   getBookById,
+  getAppSetting,
   updateBookMetadata as dbUpdateBookMetadata,
   updateBookStatus,
   updateBookTags,
 } from "../services/database.js";
+import { SETTINGS_KEY_AUTO_FETCH_COVERS } from "./settings.js";
 import {
   getWatchedFolderFromDb,
   persistWatchedFolder,
@@ -72,7 +74,20 @@ function sanitizeTagListInput(input: unknown): string[] {
 export function registerLibraryIpc(): void {
   ipcMain.handle(IPC_CHANNELS.library.ADD_PATHS, async (_event, paths: unknown): Promise<LibraryIngestResult> => {
     const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === "string") : [];
-    return ingestPaths(list);
+    const result = await ingestPaths(list);
+    const rawAuto = getAppSetting(SETTINGS_KEY_AUTO_FETCH_COVERS);
+    const autoFetchCovers = rawAuto == null || rawAuto.trim() === "" || rawAuto === "true";
+    if (autoFetchCovers) {
+      for (const bookId of result.newBookIds) {
+        const book = getBookById(bookId);
+        if (book && (book.cover_art_path == null || book.cover_art_path === "")) {
+          void fetchCoverArt(bookId).catch((e) => {
+            console.warn("[spire] auto fetch cover failed:", bookId, e);
+          });
+        }
+      }
+    }
+    return result;
   });
 
   ipcMain.handle(IPC_CHANNELS.library.GET_ALL, async (): Promise<BookListItem[]> => {

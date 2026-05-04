@@ -11,13 +11,34 @@ import {
 } from "react";
 import { Howl } from "howler";
 import { IPC_CHANNELS } from "@shared/ipc-channels";
-import type { BookDetailPayload, BookFileItem, Bookmark, BookListItem, Chapter } from "@shared/library-types";
+import type {
+  BookDetailPayload,
+  BookFileItem,
+  Bookmark,
+  BookListItem,
+  Chapter,
+  EqPreset,
+  PlayerStatePushPayload,
+  ShortcutMap,
+} from "@shared/library-types";
 import { useIPC } from "./useIPC.js";
 import { pathToFileUrlHref } from "../utils/pathToFileUrl.js";
 import { usePlayerStore } from "../store/playerStore.js";
+import { acceleratorMatchesKeyboard } from "../utils/appShortcuts.js";
+import {
+  rebuildHtml5EqChain,
+  setupHtml5AudioGraph,
+  teardownHtml5AudioGraph,
+  type Html5AudioGraph,
+} from "../utils/html5Audio.js";
 
 const PROGRESS_DEBOUNCE_MS = 5000;
 const POSITION_TICK_MS = 500;
+
+const SILENCE_RMS_THRESHOLD = 0.015;
+const SILENCE_DURATION_MS = 1500;
+const SKIP_SILENCE_SEEK_SEC = 1;
+const FILE_START_GRACE_SEC = 3;
 
 export const SPEED_CYCLE_SEQUENCE = [1, 1.25, 1.5, 1.75, 2, 2.5, 3, 0.75, 0.5] as const;
 
@@ -142,15 +163,25 @@ function usePlayerCore(): {
   deleteBookmark: (id: number) => Promise<void>;
   setSleepTimer: (config: { mode: "minutes" | "end-of-chapter" | "end-of-book"; minutes?: number }) => void;
   clearSleepTimer: () => void;
+  toggleSkipSilence: () => Promise<void>;
+  setEqPresetAndPersist: (preset: EqPreset) => Promise<void>;
 } {
+  const eqPreset = usePlayerStore((s) => s.eqPreset);
   const { invoke, subscribe } = useIPC();
   const howlRef = useRef<Howl | null>(null);
+  const html5GraphRef = useRef<Html5AudioGraph | null>(null);
   const sortedFilesRef = useRef<BookFileItem[]>([]);
   const sortedChaptersRef = useRef<Chapter[]>([]);
   const positionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastProgressFlushRef = useRef<number>(Date.now());
   const playAfterLoadRef = useRef(false);
   const mountHowlRef = useRef<(fileIndex: number, seekSeconds: number, rate: number, autoplay: boolean) => void>(() => {});
+  const silenceStartMsRef = useRef<number | null>(null);
+  const byteScratchRef = useRef<Uint8Array | null>(null);
+  const shortcutsRef = useRef<ShortcutMap | null>(null);
+  const seekByRef = useRef<(n: number) => void>((n) => {
+    void n;
+  });
 
   const clearPositionInterval = useCallback(() => {
     if (positionIntervalRef.current != null) {
@@ -160,6 +191,9 @@ function usePlayerCore(): {
   }, []);
 
   const stopHowl = useCallback(() => {
+    teardownHtml5AudioGraph(html5GraphRef.current);
+    html5GraphRef.current = null;
+    silenceStartMsRef.current = null;
     const h = howlRef.current;
     if (h) {
       h.stop();
@@ -199,6 +233,24 @@ function usePlayerCore(): {
     [invoke],
   );
 
+  const reportPlaybackState = useCallback(async () => {
+    const st = usePlayerStore.getState();
+    const book = st.currentBook;
+    const payload: PlayerStatePushPayload = {
+      isPlaying: st.isPlaying,
+      title: book?.title ?? null,
+      author: book?.author ?? null,
+      coverArtUrl: book?.cover_art_url ?? null,
+      position: st.position,
+      duration: st.duration,
+    };
+    try {
+      await invoke(IPC_CHANNELS.playback.REPORT_STATE, payload);
+    } catch {
+      /* ignore */
+    }
+  }, [invoke]);
+
   const startPositionTick = useCallback(() => {
     clearPositionInterval();
     positionIntervalRef.current = setInterval(() => {
@@ -219,6 +271,37 @@ function usePlayerCore(): {
       store.setCurrentChapterIndex(chIdx);
 
       void flushProgress(false);
+      void reportPlaybackState();
+
+      const graph = html5GraphRef.current;
+      if (graph && store.skipSilenceEnabled && pos >= FILE_START_GRACE_SEC) {
+        const n = graph.analyser.frequencyBinCount;
+        if (!byteScratchRef.current || byteScratchRef.current.length !== n) {
+          byteScratchRef.current = new Uint8Array(new ArrayBuffer(n));
+        }
+        const buf = byteScratchRef.current;
+        graph.analyser.getByteTimeDomainData(buf as Uint8Array<ArrayBuffer>);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) {
+          const v = (buf[i]! - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / buf.length);
+        if (rms < SILENCE_RMS_THRESHOLD) {
+          if (silenceStartMsRef.current == null) {
+            silenceStartMsRef.current = Date.now();
+          } else if (Date.now() - silenceStartMsRef.current >= SILENCE_DURATION_MS) {
+            const maxT = dur > 0 ? dur : pos + SKIP_SILENCE_SEEK_SEC;
+            const target = Math.min(pos + SKIP_SILENCE_SEEK_SEC, maxT);
+            seekByRef.current(target - pos);
+            silenceStartMsRef.current = null;
+          }
+        } else {
+          silenceStartMsRef.current = null;
+        }
+      } else {
+        silenceStartMsRef.current = null;
+      }
 
       const sleep = store.sleepTimer;
       if (sleep?.mode === "minutes" && sleep.endsAt != null && Date.now() >= sleep.endsAt) {
@@ -256,7 +339,7 @@ function usePlayerCore(): {
         }
       }
     }, POSITION_TICK_MS);
-  }, [clearPositionInterval, flushProgress]);
+  }, [clearPositionInterval, flushProgress, reportPlaybackState]);
 
   const mountHowl = useCallback(
     (fileIndex: number, seekSeconds: number, rate: number, autoplay: boolean) => {
@@ -289,6 +372,12 @@ function usePlayerCore(): {
         howl.rate(rate);
         const chIdx = findCurrentChapterIndex(sortedChaptersRef.current, file.id, clamped, dur);
         usePlayerStore.getState().setCurrentChapterIndex(chIdx);
+
+        teardownHtml5AudioGraph(html5GraphRef.current);
+        html5GraphRef.current = null;
+        const graph = setupHtml5AudioGraph(howl, usePlayerStore.getState().eqPreset);
+        html5GraphRef.current = graph;
+
         const wantPlay = autoplay || playAfterLoadRef.current;
         playAfterLoadRef.current = false;
         if (wantPlay) {
@@ -296,6 +385,7 @@ function usePlayerCore(): {
           usePlayerStore.getState().setIsPlaying(true);
           startPositionTick();
         }
+        void reportPlaybackState();
       });
 
       howl.on("loaderror", (_id: unknown, err: unknown) => {
@@ -317,10 +407,11 @@ function usePlayerCore(): {
         void invoke(IPC_CHANNELS.playback.MARK_COMPLETE, st.currentBook?.id);
         st.setSleepTimer(null);
         st.setIsPlaying(false);
+        void reportPlaybackState();
         stopHowl();
       });
     },
-    [clearPositionInterval, flushProgress, invoke, startPositionTick, stopHowl],
+    [clearPositionInterval, flushProgress, invoke, reportPlaybackState, startPositionTick, stopHowl],
   );
 
   useLayoutEffect(() => {
@@ -370,8 +461,9 @@ function usePlayerCore(): {
       usePlayerStore.getState().setBookmarks(bookmarks);
       playAfterLoadRef.current = false;
       mountHowl(fileIndex, initialSeek, speed, false);
+      void reportPlaybackState();
     },
-    [clearPositionInterval, flushProgress, invoke, mountHowl, stopHowl],
+    [clearPositionInterval, flushProgress, invoke, mountHowl, reportPlaybackState, stopHowl],
   );
 
   const play = useCallback(() => {
@@ -383,7 +475,8 @@ function usePlayerCore(): {
     howl.play();
     usePlayerStore.getState().setIsPlaying(true);
     startPositionTick();
-  }, [startPositionTick]);
+    void reportPlaybackState();
+  }, [reportPlaybackState, startPositionTick]);
 
   const pause = useCallback(() => {
     const howl = howlRef.current;
@@ -393,7 +486,8 @@ function usePlayerCore(): {
     clearPositionInterval();
     usePlayerStore.getState().setIsPlaying(false);
     void flushProgress(true);
-  }, [clearPositionInterval, flushProgress]);
+    void reportPlaybackState();
+  }, [clearPositionInterval, flushProgress, reportPlaybackState]);
 
   const togglePlay = useCallback(() => {
     const howl = howlRef.current;
@@ -423,8 +517,9 @@ function usePlayerCore(): {
       );
       store.setCurrentChapterIndex(chIdx);
       void flushProgress(true);
+      void reportPlaybackState();
     },
-    [flushProgress],
+    [flushProgress, reportPlaybackState],
   );
 
   const seekBy = useCallback(
@@ -436,6 +531,10 @@ function usePlayerCore(): {
     },
     [seekTo],
   );
+
+  useLayoutEffect(() => {
+    seekByRef.current = seekBy;
+  }, [seekBy]);
 
   const seekToChapter = useCallback(
     (chapter: Chapter) => {
@@ -611,6 +710,102 @@ function usePlayerCore(): {
     usePlayerStore.getState().setSleepTimer(null);
   }, []);
 
+  const toggleSkipSilence = useCallback(async () => {
+    usePlayerStore.getState().toggleSkipSilence();
+    const next = usePlayerStore.getState().skipSilenceEnabled;
+    await invoke(IPC_CHANNELS.settings.SAVE_SKIP_SILENCE, next);
+    void reportPlaybackState();
+  }, [invoke, reportPlaybackState]);
+
+  const setEqPresetAndPersist = useCallback(
+    async (preset: EqPreset) => {
+      usePlayerStore.getState().setEqPreset(preset);
+      const g = html5GraphRef.current;
+      if (g) {
+        rebuildHtml5EqChain(g, preset);
+      }
+      await invoke(IPC_CHANNELS.settings.SET_EQ_PRESET, preset);
+      void reportPlaybackState();
+    },
+    [invoke, reportPlaybackState],
+  );
+
+  useEffect(() => {
+    void (async () => {
+      const [skip, eq, sc] = await Promise.all([
+        invoke<boolean>(IPC_CHANNELS.settings.GET_SKIP_SILENCE),
+        invoke<EqPreset>(IPC_CHANNELS.settings.GET_EQ_PRESET),
+        invoke<ShortcutMap>(IPC_CHANNELS.settings.GET_SHORTCUTS),
+      ]);
+      usePlayerStore.getState().setSkipSilenceEnabled(skip);
+      usePlayerStore.getState().setEqPreset(eq);
+      shortcutsRef.current = sc;
+    })();
+  }, [invoke]);
+
+  useEffect(() => {
+    const g = html5GraphRef.current;
+    if (g) {
+      rebuildHtml5EqChain(g, eqPreset);
+    }
+  }, [eqPreset]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat) {
+        return;
+      }
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
+        return;
+      }
+      const sc = shortcutsRef.current;
+      if (!sc) {
+        return;
+      }
+      if (acceleratorMatchesKeyboard(sc.playPause, e)) {
+        e.preventDefault();
+        togglePlay();
+        return;
+      }
+      if (acceleratorMatchesKeyboard(sc.nextChapter, e)) {
+        e.preventDefault();
+        nextChapter();
+        return;
+      }
+      if (acceleratorMatchesKeyboard(sc.prevChapter, e)) {
+        e.preventDefault();
+        prevChapter();
+        return;
+      }
+      if (acceleratorMatchesKeyboard(sc.nextFile, e)) {
+        e.preventDefault();
+        nextFile();
+        return;
+      }
+      if (acceleratorMatchesKeyboard(sc.prevFile, e)) {
+        e.preventDefault();
+        prevFile();
+        return;
+      }
+      if (acceleratorMatchesKeyboard(sc.speedUp, e)) {
+        e.preventDefault();
+        cycleSpeed();
+        return;
+      }
+      if (acceleratorMatchesKeyboard(sc.speedDown, e)) {
+        e.preventDefault();
+        const cur = usePlayerStore.getState().speed;
+        const idx = SPEED_CYCLE_SEQUENCE.findIndex((s) => Math.abs(s - cur) < 0.02);
+        const prevIdx = idx <= 0 ? SPEED_CYCLE_SEQUENCE.length - 1 : idx - 1;
+        const prevSp = SPEED_CYCLE_SEQUENCE[prevIdx]!;
+        setSpeed(prevSp);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [cycleSpeed, nextChapter, nextFile, prevChapter, prevFile, setSpeed, togglePlay]);
+
   useEffect(() => {
     const unsub = subscribe(IPC_CHANNELS.playback.MEDIA_KEY, (...args: unknown[]) => {
       const action = args[0];
@@ -620,10 +815,14 @@ function usePlayerCore(): {
         nextFile();
       } else if (action === "prev") {
         prevFile();
+      } else if (action === "seek-forward-30") {
+        seekBy(30);
+      } else if (action === "seek-back-30") {
+        seekBy(-30);
       }
     });
     return () => unsub();
-  }, [nextFile, prevFile, subscribe, togglePlay]);
+  }, [nextFile, prevFile, seekBy, subscribe, togglePlay]);
 
   useEffect(
     () => () => {
@@ -653,6 +852,8 @@ function usePlayerCore(): {
     deleteBookmark,
     setSleepTimer,
     clearSleepTimer,
+    toggleSkipSilence,
+    setEqPresetAndPersist,
   };
 }
 

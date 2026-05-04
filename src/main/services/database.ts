@@ -4,6 +4,7 @@ import Database from "better-sqlite3";
 
 type SqliteDatabase = InstanceType<typeof Database>;
 import { app } from "electron";
+import type { ListeningStats } from "../../shared/library-types.js";
 import { getDatabasePath, getLibraryDirectory, getStagingDirectoryRoot } from "../utils/paths.js";
 
 const SCHEMA_VERSION_KEY = "schema_version";
@@ -697,4 +698,200 @@ export function getAllDownloads(): DownloadRow[] {
 export function getDownloadById(id: number): DownloadRow | undefined {
   const db = getDatabase();
   return db.prepare(`SELECT * FROM downloads WHERE id = ?`).get(id) as DownloadRow | undefined;
+}
+
+export function getAppSetting(key: string): string | null {
+  const db = getDatabase();
+  const row = db.prepare(`SELECT value FROM settings WHERE key = ?`).get(key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function setAppSetting(key: string, value: string): void {
+  const db = getDatabase();
+  db.prepare(
+    `INSERT INTO settings (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+  ).run(key, value);
+}
+
+export type ListeningStatsRow = {
+  hoursThisWeek: number;
+  hoursThisMonth: number;
+  hoursAllTime: number;
+  booksCompleted: number;
+  booksInProgress: number;
+  avgPlaybackSpeed: number;
+};
+
+/** ISO timestamps for streak computation (local calendar dates derived in TS). */
+export function getAllLastListenedAtTimestamps(): string[] {
+  const db = getDatabase();
+  const rows = db
+    .prepare(`SELECT last_listened_at AS t FROM progress WHERE last_listened_at IS NOT NULL`)
+    .all() as { t: string }[];
+  return rows.map((r) => r.t);
+}
+
+/**
+ * Aggregates listening stats from `progress` + `books` (no new tables).
+ * Streak fields are merged in {@link getListeningStats}.
+ */
+export function getListeningStatsAggregates(): ListeningStatsRow {
+  const db = getDatabase();
+
+  const weekRow = db
+    .prepare(
+      `SELECT COALESCE(SUM(position_seconds), 0) AS v
+       FROM progress
+       WHERE last_listened_at IS NOT NULL
+         AND datetime(last_listened_at) >= datetime('now', '-7 days')`,
+    )
+    .get() as { v: number };
+
+  const monthRow = db
+    .prepare(
+      `SELECT COALESCE(SUM(position_seconds), 0) AS v
+       FROM progress
+       WHERE last_listened_at IS NOT NULL
+         AND datetime(last_listened_at) >= datetime('now', '-30 days')`,
+    )
+    .get() as { v: number };
+
+  const allTimeRow = db
+    .prepare(
+      `SELECT COALESCE(SUM(
+         CASE
+           WHEN b.total_duration IS NOT NULL AND b.total_duration > 0
+           THEN b.total_duration * MIN(1.0, MAX(0.0, p.position_seconds / b.total_duration))
+           ELSE 0
+         END
+       ), 0) AS v
+       FROM progress p
+       JOIN books b ON b.id = p.book_id`,
+    )
+    .get() as { v: number };
+
+  const completedRow = db
+    .prepare(`SELECT COUNT(*) AS c FROM progress WHERE completed_at IS NOT NULL`)
+    .get() as { c: number };
+
+  const inProgressRow = db.prepare(`SELECT COUNT(*) AS c FROM books WHERE status = 'in-progress'`).get() as { c: number };
+
+  const avgRow = db
+    .prepare(`SELECT AVG(playback_speed) AS a FROM progress WHERE playback_speed > 0`)
+    .get() as { a: number | null };
+
+  return {
+    hoursThisWeek: Number(weekRow.v) / 3600,
+    hoursThisMonth: Number(monthRow.v) / 3600,
+    hoursAllTime: Number(allTimeRow.v) / 3600,
+    booksCompleted: Number(completedRow.c),
+    booksInProgress: Number(inProgressRow.c),
+    avgPlaybackSpeed: avgRow.a != null && Number.isFinite(avgRow.a) ? Number(avgRow.a) : 0,
+  };
+}
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
+
+/** Local calendar YYYY-MM-DD (for streaks). */
+function toLocalYmd(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function parseYmd(ymd: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) {
+    return null;
+  }
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const day = Number(m[3]);
+  const d = new Date(y, mo, day);
+  if (d.getFullYear() !== y || d.getMonth() !== mo || d.getDate() !== day) {
+    return null;
+  }
+  return d;
+}
+
+function addDaysYmd(ymd: string, delta: number): string {
+  const d = parseYmd(ymd);
+  if (!d) {
+    return ymd;
+  }
+  d.setDate(d.getDate() + delta);
+  return toLocalYmd(d);
+}
+
+function daysBetweenYmd(a: string, b: string): number {
+  const da = parseYmd(a);
+  const db = parseYmd(b);
+  if (!da || !db) {
+    return NaN;
+  }
+  return Math.round((db.getTime() - da.getTime()) / 86400000);
+}
+
+export function computeStreaksFromListenTimestamps(isoStrings: string[]): { currentStreak: number; longestStreak: number } {
+  const days = new Set<string>();
+  for (const iso of isoStrings) {
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) {
+      continue;
+    }
+    days.add(toLocalYmd(new Date(t)));
+  }
+  if (days.size === 0) {
+    return { currentStreak: 0, longestStreak: 0 };
+  }
+
+  const sortedAsc = [...days].sort((x, y) => x.localeCompare(y));
+  let longest = 1;
+  let run = 1;
+  for (let i = 1; i < sortedAsc.length; i++) {
+    const prev = sortedAsc[i - 1]!;
+    const cur = sortedAsc[i]!;
+    if (daysBetweenYmd(prev, cur) === 1) {
+      run += 1;
+      longest = Math.max(longest, run);
+    } else {
+      run = 1;
+    }
+  }
+
+  const today = toLocalYmd(new Date());
+  const yesterday = addDaysYmd(today, -1);
+  let currentStreak = 0;
+  if (days.has(today)) {
+    let cursor = today;
+    while (days.has(cursor)) {
+      currentStreak += 1;
+      cursor = addDaysYmd(cursor, -1);
+    }
+  } else if (days.has(yesterday)) {
+    let cursor = yesterday;
+    while (days.has(cursor)) {
+      currentStreak += 1;
+      cursor = addDaysYmd(cursor, -1);
+    }
+  }
+
+  return { currentStreak, longestStreak: longest };
+}
+
+export function getListeningStats(): ListeningStats {
+  const agg = getListeningStatsAggregates();
+  const stamps = getAllLastListenedAtTimestamps();
+  const { currentStreak, longestStreak } = computeStreaksFromListenTimestamps(stamps);
+  return {
+    hoursThisWeek: agg.hoursThisWeek,
+    hoursThisMonth: agg.hoursThisMonth,
+    hoursAllTime: agg.hoursAllTime,
+    booksCompleted: agg.booksCompleted,
+    booksInProgress: agg.booksInProgress,
+    avgPlaybackSpeed: agg.avgPlaybackSpeed,
+    currentStreak,
+    longestStreak,
+  };
 }
