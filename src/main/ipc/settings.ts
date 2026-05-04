@@ -1,4 +1,5 @@
 import { app, ipcMain } from "electron";
+import { autoUpdater } from "electron-updater";
 import { IPC_CHANNELS } from "../../shared/ipc-channels.js";
 import type { StatsSummary } from "../../shared/library-types.js";
 import {
@@ -159,6 +160,16 @@ export function registerSettingsIpc(deps: SettingsIpcDeps): void {
 
   ipcMain.handle(IPC_CHANNELS.settings.SAVE_AUTO_FETCH_COVERS, async (_event, enabled: unknown): Promise<{ ok: boolean }> => {
     setAppSetting(SETTINGS_KEY_AUTO_FETCH_COVERS, enabled === true ? "true" : "false");
+    return { ok: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.settings.APP_RESTART_TO_UPDATE, async (): Promise<{ ok: boolean }> => {
+    if (!app.isPackaged) {
+      return { ok: false };
+    }
+    setImmediate(() => {
+      autoUpdater.quitAndInstall();
+    });
     return { ok: true };
   });
 }

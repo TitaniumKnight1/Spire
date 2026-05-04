@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Download yt-dlp
+        run: |
+          New-Item -ItemType Directory -Force -Path binaries
+          Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile "binaries/yt-dlp.exe"
+        shell: pwsh
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          $prevTag = git describe --tags --abbrev=0 HEAD^ 2>$null
+          if ($LASTEXITCODE -ne 0) { $prevTag = "" }
+
+          $logArgs = if ($prevTag) { "$prevTag..HEAD" } else { "HEAD" }
+          if ($prevTag) {
+            $commits = @(git log $logArgs --pretty=format:"%s" --no-merges)
+          } else {
+            $commits = @(git log --pretty=format:"%s" --no-merges)
+          }
+
+          $features = @()
+          $fixes = @()
+          $other = @()
+
+          foreach ($commit in $commits) {
+            if ($commit -match "^feat(\(.+\))?!?:") { $features += "- $commit" }
+            elseif ($commit -match "^fix(\(.+\))?!?:") { $fixes += "- $commit" }
+            elseif ($commit -notmatch "^(chore|docs|ci|style|refactor|test):") { $other += "- $commit" }
+          }
+
+          $notes = ""
+          if ($features) { $notes += "## What's New`n" + ($features -join "`n") + "`n`n" }
+          if ($fixes) { $notes += "## Bug Fixes`n" + ($fixes -join "`n") + "`n`n" }
+          if ($other) { $notes += "## Other Changes`n" + ($other -join "`n") + "`n`n" }
+          if (-not $notes) { $notes = "Maintenance release." }
+
+          $notes += "`n---`n> ⚠️ Windows may show a SmartScreen warning on first run — this is expected for unsigned open-source apps. Click 'More info' → 'Run anyway'."
+
+          echo "RELEASE_NOTES<<EOF" >> $env:GITHUB_OUTPUT
+          echo $notes >> $env:GITHUB_OUTPUT
+          echo "EOF" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Spire ${{ github.ref_name }}"
+          body: ${{ steps.release_notes.outputs.RELEASE_NOTES }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
+          files: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

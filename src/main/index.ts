@@ -20,8 +20,6 @@ import { getTorrentManager } from "./services/torrent.js";
 import { checkForUpdates } from "./services/updater.js";
 import { IPC_CHANNELS } from "../shared/ipc-channels.js";
 
-void checkForUpdates; // keep import for Milestone 9; do not invoke yet
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -253,6 +251,12 @@ function createMainWindow(): BrowserWindow {
     const indexHtml = path.join(__dirname, "..", "renderer", "index.html");
     void win.loadFile(indexHtml);
   }
+
+  win.webContents.on("did-finish-load", () => {
+    setTimeout(() => {
+      checkForUpdates(win);
+    }, 3000);
+  });
 
   win.on("close", (event) => {
     if (!isQuitting) {

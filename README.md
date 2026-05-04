@@ -5,6 +5,7 @@ A lightweight, local-first audiobook and podcast player for Windows — built fo
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows-blue)
 ![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)
+[![Latest Release](https://img.shields.io/github/v/release/TitaniumKnight1/Spire?label=download)](https://github.com/TitaniumKnight1/Spire/releases/latest)
 
 ---
 
@@ -51,6 +52,8 @@ The Windows audiobook player landscape is thin and outdated. Nothing combines a 
 
 Head to [Releases](https://github.com/TitaniumKnight1/Spire/releases) and grab the latest `Spire Setup x.x.x.exe`.
 
+> **First run on Windows:** SmartScreen may show a warning. Click "More info" → "Run anyway". This is expected for open-source apps without a code signing certificate.
+>
 > Linux AppImage coming in v0.4. macOS is not a planned target.
 
 ---

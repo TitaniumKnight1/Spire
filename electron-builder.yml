@@ -1,5 +1,10 @@
 appId: io.spire.app
 productName: Spire
+publish:
+  provider: github
+  owner: TitaniumKnight1
+  repo: Spire
+  releaseType: release
 directories:
   output: dist
   buildResources: assets
@@ -8,10 +13,10 @@ files:
   - assets/**/*
   - package.json
 extraResources:
-  - from: binaries
-    to: binaries
+  - from: binaries/
+    to: binaries/
     filter:
-      - "**/*"
+      - "*.exe"
 win:
   icon: assets/icon.ico
   target:

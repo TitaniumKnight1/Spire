@@ -1,4 +1,5 @@
-import { type ReactElement, useMemo, useState } from "react";
+import { type ReactElement, useEffect, useMemo, useState } from "react";
+import { IPC_CHANNELS } from "@shared/ipc-channels";
 import type { SavedPodcastFeed } from "@shared/library-types";
 import { Bookmarks, ChapterList, PlayerBar } from "./components/Player/index.js";
 import { LibraryView } from "./components/Library/index.js";
@@ -19,9 +20,16 @@ const NAV_ITEMS: { key: NavKey; label: string }[] = [
   { key: "settings", label: "Settings" },
 ];
 
+type UpdateBannerState =
+  | { phase: "idle" }
+  | { phase: "available"; version: string }
+  | { phase: "downloaded"; version: string };
+
 export function App(): ReactElement {
   const [active, setActive] = useState<NavKey>("library");
   const [podcastDetail, setPodcastDetail] = useState<SavedPodcastFeed | null>(null);
+  const [updateBanner, setUpdateBanner] = useState<UpdateBannerState>({ phase: "idle" });
+  const [updateDismissed, setUpdateDismissed] = useState(false);
   const ipc = useIPC();
   const downloadsApi = useDownloads();
   const showChapterPanel = usePlayerStore((s) => s.showChapterPanel);
@@ -34,6 +42,27 @@ export function App(): ReactElement {
     ).length;
   }, [downloadsApi.downloads]);
 
+  useEffect(() => {
+    const offAvailable = ipc.subscribe(IPC_CHANNELS.updates.UPDATE_AVAILABLE, (...payload) => {
+      const first = payload[0] as { version?: string } | undefined;
+      const version = typeof first?.version === "string" ? first.version : "";
+      setUpdateBanner({ phase: "available", version });
+      setUpdateDismissed(false);
+    });
+    const offDownloaded = ipc.subscribe(IPC_CHANNELS.updates.UPDATE_DOWNLOADED, (...payload) => {
+      const first = payload[0] as { version?: string } | undefined;
+      const version = typeof first?.version === "string" ? first.version : "";
+      setUpdateBanner({ phase: "downloaded", version });
+      setUpdateDismissed(false);
+    });
+    return () => {
+      offAvailable();
+      offDownloaded();
+    };
+  }, [ipc]);
+
+  const showUpdateBanner = !updateDismissed && updateBanner.phase !== "idle";
+
   return (
     <div
       style={{
@@ -45,6 +74,74 @@ export function App(): ReactElement {
         fontFamily: "system-ui, sans-serif",
       }}
     >
+      {showUpdateBanner ? (
+        <div
+          style={{
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            padding: "10px 14px",
+            borderBottom: "1px solid #2a2a2a",
+            background: "#161616",
+            fontSize: 13,
+            color: "#d0d0d0",
+          }}
+        >
+          <span style={{ flex: 1, minWidth: 0 }}>
+            {updateBanner.phase === "available" ? (
+              <>
+                Update available{updateBanner.version ? ` (v${updateBanner.version})` : ""} — downloading…
+              </>
+            ) : (
+              <>
+                Update ready — will install on next restart
+                {updateBanner.version ? ` (v${updateBanner.version})` : ""}
+              </>
+            )}
+          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            {updateBanner.phase === "downloaded" ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void ipc.invoke(IPC_CHANNELS.settings.APP_RESTART_TO_UPDATE);
+                }}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  border: "1px solid #3584e4",
+                  background: "#1e3a5f",
+                  color: "#e8f2ff",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                Restart Now
+              </button>
+            ) : null}
+            <button
+              type="button"
+              aria-label="Dismiss update notice"
+              onClick={() => setUpdateDismissed(true)}
+              style={{
+                padding: "4px 8px",
+                borderRadius: 6,
+                border: "1px solid #333",
+                background: "transparent",
+                color: "#aaa",
+                cursor: "pointer",
+                fontSize: 16,
+                lineHeight: 1,
+              }}
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         <aside
           style={{

@@ -68,9 +68,15 @@ export const IPC_CHANNELS = {
     SAVE_SLEEP_TIMER_DEFAULT: "spire:settings:save-sleep-timer-default",
     GET_AUTO_FETCH_COVERS: "spire:settings:get-auto-fetch-covers",
     SAVE_AUTO_FETCH_COVERS: "spire:settings:save-auto-fetch-covers",
+    APP_RESTART_TO_UPDATE: "spire:settings:app-restart-to-update",
   },
   stats: {
     GET_SUMMARY: "spire:stats:get-summary",
+  },
+  /** Main → renderer (push). */
+  updates: {
+    UPDATE_AVAILABLE: "spire:updates:update-available",
+    UPDATE_DOWNLOADED: "spire:updates:update-downloaded",
   },
 } as const;
 
@@ -122,6 +128,7 @@ export const IPC_INVOKE_CHANNELS = [
   IPC_CHANNELS.settings.SAVE_SLEEP_TIMER_DEFAULT,
   IPC_CHANNELS.settings.GET_AUTO_FETCH_COVERS,
   IPC_CHANNELS.settings.SAVE_AUTO_FETCH_COVERS,
+  IPC_CHANNELS.settings.APP_RESTART_TO_UPDATE,
   IPC_CHANNELS.stats.GET_SUMMARY,
 ] as const;
 
