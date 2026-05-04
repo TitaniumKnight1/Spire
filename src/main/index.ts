@@ -15,6 +15,7 @@ import { registerPlaybackIpc } from "./ipc/playback.js";
 import { registerSettingsIpc } from "./ipc/settings.js";
 import { initializeDatabase } from "./services/database.js";
 import { resumeUrlDownloadsAfterBoot } from "./services/downloader.js";
+import { restartWatcherFromSettings } from "./services/watcher.js";
 import { getTorrentManager } from "./services/torrent.js";
 import { checkForUpdates } from "./services/updater.js";
 
@@ -57,6 +58,7 @@ if (!gotSingleInstanceLock) {
 
   void app.whenReady().then(async () => {
     initializeDatabase();
+    restartWatcherFromSettings();
     registerAllIpc();
 
     for (const arg of process.argv.slice(1)) {

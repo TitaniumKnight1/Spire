@@ -3,10 +3,12 @@ import { IPC_CHANNELS } from "../../shared/ipc-channels.js";
 import type { Bookmark } from "../../shared/library-types.js";
 import {
   deleteBookmarkById,
+  getBookById,
   getBookmarksByBook,
   insertBookmark,
   markBookPlaybackComplete,
   savePlaybackProgress,
+  updateBookStatus,
 } from "../services/database.js";
 
 type SaveProgressPayload = {
@@ -45,6 +47,10 @@ export function registerPlaybackIpc(): void {
     const position = asFiniteNumber(p.position_seconds) ?? 0;
     const speed = asFiniteNumber(p.playback_speed) ?? 1;
     savePlaybackProgress(bookId, currentFileId, Math.max(0, position), speed);
+    const book = getBookById(bookId);
+    if (book && book.status === "unstarted") {
+      updateBookStatus(bookId, "in-progress");
+    }
     return { ok: true };
   });
 
@@ -54,6 +60,7 @@ export function registerPlaybackIpc(): void {
       return { ok: false };
     }
     markBookPlaybackComplete(id);
+    updateBookStatus(id, "finished");
     return { ok: true };
   });
 

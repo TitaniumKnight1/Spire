@@ -1,6 +1,7 @@
 import { type ReactElement } from "react";
 import type { BookListItem } from "@shared/library-types";
 import { BookCard } from "./BookCard.js";
+import { groupBooksForSeriesView } from "./seriesGrouping.js";
 
 function EmptyLibrary({
   onBrowse,
@@ -36,13 +37,22 @@ function EmptyLibrary({
   );
 }
 
+const gridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+  gap: 16,
+  alignContent: "start" as const,
+};
+
 export function LibraryGrid({
   books,
+  groupBySeries,
   onBookClick,
   onBrowse,
   dragActive,
 }: {
   books: BookListItem[];
+  groupBySeries: boolean;
   onBookClick: (id: number) => void;
   onBrowse: () => void;
   dragActive: boolean;
@@ -51,15 +61,28 @@ export function LibraryGrid({
     return <EmptyLibrary onBrowse={onBrowse} dragActive={dragActive} />;
   }
 
+  if (groupBySeries) {
+    const groups = groupBooksForSeriesView(books);
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+        {groups.map((g) => (
+          <div key={g.label}>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, color: "#ccc", letterSpacing: 0.3 }}>
+              {g.label}
+            </div>
+            <div style={gridStyle}>
+              {g.books.map((book) => (
+                <BookCard key={book.id} book={book} onClick={() => onBookClick(book.id)} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-        gap: 16,
-        alignContent: "start",
-      }}
-    >
+    <div style={gridStyle}>
       {books.map((book) => (
         <BookCard key={book.id} book={book} onClick={() => onBookClick(book.id)} />
       ))}

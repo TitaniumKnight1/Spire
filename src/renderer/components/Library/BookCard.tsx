@@ -3,10 +3,11 @@ import type { BookListItem } from "@shared/library-types";
 import { formatDuration } from "../../utils/formatDuration.js";
 
 function statusLabel(book: BookListItem): "Unstarted" | "In Progress" | "Finished" {
-  if (book.completed_at) {
+  const s = book.status;
+  if (s === "finished") {
     return "Finished";
   }
-  if (book.position_seconds > 0) {
+  if (s === "in-progress") {
     return "In Progress";
   }
   return "Unstarted";

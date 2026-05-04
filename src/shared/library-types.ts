@@ -9,11 +9,35 @@ export type BookListItem = {
   cover_art_url: string | null;
   description: string | null;
   status: string;
+  /** Parsed from `books.tags` JSON (lowercase tags in DB). */
+  tags: string[];
   date_added: string;
   total_duration: number | null;
   position_seconds: number;
   completed_at: string | null;
   progress_percent: number;
+};
+
+/** Renderer-side library toolbar filters (not persisted). */
+export type FilterState = {
+  query: string;
+  status: "all" | "unstarted" | "in-progress" | "finished";
+  tag: string | null;
+  series: string | null;
+  groupBySeries: boolean;
+};
+
+/** IPC payload for updating editable book fields from BookDetail. */
+export type MetadataUpdate = {
+  bookId: number;
+  title: string;
+  author: string | null;
+  narrator: string | null;
+  series: string | null;
+  series_order: number | null;
+  description: string | null;
+  /** Absolute path chosen in main-process dialog, or final covers path after save. */
+  cover_art_path: string | null;
 };
 
 export type BookFileItem = {
@@ -79,8 +103,11 @@ export type BookDetailPayload = {
     series: string | null;
     series_order: number | null;
     cover_art_url: string | null;
+    /** Absolute path on disk for metadata saves and cover picker (same row as `cover_art_url`). */
+    cover_art_path: string | null;
     description: string | null;
     status: string;
+    tags: string[];
     date_added: string;
     total_duration: number | null;
   };
@@ -105,6 +132,21 @@ export type LibraryDeleteResult = {
 export type LibraryOpenDialogResult = {
   canceled: boolean;
   paths: string[];
+};
+
+export type LibraryOpenCoverDialogResult = {
+  canceled: boolean;
+  path: string | null;
+};
+
+export type LibraryUpdateTagsPayload = {
+  bookId: number;
+  tags: string[];
+};
+
+export type LibrarySetStatusPayload = {
+  bookId: number;
+  status: "unstarted" | "in-progress" | "finished";
 };
 
 export type DownloadSourceType = "magnet" | "torrent_file" | "http" | "ytdlp" | "rss";

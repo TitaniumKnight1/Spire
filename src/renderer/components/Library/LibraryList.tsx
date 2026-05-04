@@ -1,12 +1,14 @@
 import { type ReactElement } from "react";
 import type { BookListItem } from "@shared/library-types";
 import { formatDuration } from "../../utils/formatDuration.js";
+import { groupBooksForSeriesView } from "./seriesGrouping.js";
 
-function statusLabel(book: BookListItem): "Unstarted" | "In Progress" | "Finished" {
-  if (book.completed_at) {
+function statusBadge(book: BookListItem): "Unstarted" | "In Progress" | "Finished" {
+  const s = book.status;
+  if (s === "finished") {
     return "Finished";
   }
-  if (book.position_seconds > 0) {
+  if (s === "in-progress") {
     return "In Progress";
   }
   return "Unstarted";
@@ -55,13 +57,39 @@ function EmptyLibrary({
   );
 }
 
+const headerRowStyle = {
+  display: "grid",
+  gridTemplateColumns: "44px 1.4fr 1fr 100px 120px 110px",
+  gap: 8,
+  padding: "8px 12px",
+  fontSize: 12,
+  color: "#777",
+  borderBottom: "1px solid #222",
+};
+
+const rowStyle = {
+  display: "grid",
+  gridTemplateColumns: "44px 1.4fr 1fr 100px 120px 110px",
+  gap: 8,
+  alignItems: "center",
+  padding: "8px 12px",
+  border: "none",
+  borderRadius: 8,
+  background: "#161616",
+  color: "inherit",
+  cursor: "pointer",
+  textAlign: "left" as const,
+};
+
 export function LibraryList({
   books,
+  groupBySeries,
   onBookClick,
   onBrowse,
   dragActive,
 }: {
   books: BookListItem[];
+  groupBySeries: boolean;
   onBookClick: (id: number) => void;
   onBrowse: () => void;
   dragActive: boolean;
@@ -70,94 +98,90 @@ export function LibraryList({
     return <EmptyLibrary onBrowse={onBrowse} dragActive={dragActive} />;
   }
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "44px 1.4fr 1fr 100px 120px 110px",
-          gap: 8,
-          padding: "8px 12px",
-          fontSize: 12,
-          color: "#777",
-          borderBottom: "1px solid #222",
-        }}
-      >
-        <span />
-        <span>Title</span>
-        <span>Author</span>
-        <span>Duration</span>
-        <span>Progress</span>
-        <span>Status</span>
-      </div>
-      {books.map((book) => {
-        const badge = statusLabel(book);
-        const pct = book.progress_percent;
-        return (
-          <button
-            key={book.id}
-            type="button"
-            onClick={() => onBookClick(book.id)}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "44px 1.4fr 1fr 100px 120px 110px",
-              gap: 8,
-              alignItems: "center",
-              padding: "8px 12px",
-              border: "none",
-              borderRadius: 8,
-              background: "#161616",
-              color: "inherit",
-              cursor: "pointer",
-              textAlign: "left",
-            }}
-          >
-            <div
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 6,
-                overflow: "hidden",
-                background: "#2a2a2a",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 12,
-                fontWeight: 700,
-                color: "#666",
-              }}
+  function renderRows(items: BookListItem[]): ReactElement {
+    return (
+      <>
+        <div style={headerRowStyle}>
+          <span />
+          <span>Title</span>
+          <span>Author</span>
+          <span>Duration</span>
+          <span>Progress</span>
+          <span>Status</span>
+        </div>
+        {items.map((book) => {
+          const badge = statusBadge(book);
+          const pct = book.progress_percent;
+          return (
+            <button
+              key={book.id}
+              type="button"
+              onClick={() => onBookClick(book.id)}
+              style={rowStyle}
             >
-              {book.cover_art_url ? (
-                <img src={book.cover_art_url} alt="" style={{ width: 40, height: 40, objectFit: "cover" }} />
-              ) : (
-                initials(book.title, book.author)
-              )}
-            </div>
-            <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {book.title}
-            </span>
-            <span style={{ color: "#9a9a9a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {book.author ?? "—"}
-            </span>
-            <span style={{ color: "#888", fontSize: 13 }}>{formatDuration(book.total_duration)}</span>
-            <div>
-              <div style={{ height: 4, borderRadius: 2, background: "#2a2a2a", overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${pct}%`, background: "#4a8fd4" }} />
+              <div
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 6,
+                  overflow: "hidden",
+                  background: "#2a2a2a",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: "#666",
+                }}
+              >
+                {book.cover_art_url ? (
+                  <img src={book.cover_art_url} alt="" style={{ width: 40, height: 40, objectFit: "cover" }} />
+                ) : (
+                  initials(book.title, book.author)
+                )}
               </div>
-              <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>{pct.toFixed(0)}%</div>
-            </div>
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: badge === "Finished" ? "#6abf69" : badge === "In Progress" ? "#d4a84a" : "#777",
-              }}
-            >
-              {badge}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
+              <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {book.title}
+              </span>
+              <span style={{ color: "#9a9a9a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {book.author ?? "—"}
+              </span>
+              <span style={{ color: "#888", fontSize: 13 }}>{formatDuration(book.total_duration)}</span>
+              <div>
+                <div style={{ height: 4, borderRadius: 2, background: "#2a2a2a", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${pct}%`, background: "#4a8fd4" }} />
+                </div>
+                <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>{pct.toFixed(0)}%</div>
+              </div>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: badge === "Finished" ? "#6abf69" : badge === "In Progress" ? "#d4a84a" : "#777",
+                }}
+              >
+                {badge}
+              </span>
+            </button>
+          );
+        })}
+      </>
+    );
+  }
+
+  if (groupBySeries) {
+    const groups = groupBooksForSeriesView(books);
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+        {groups.map((g) => (
+          <div key={g.label}>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, color: "#ccc" }}>{g.label}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>{renderRows(g.books)}</div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>{renderRows(books)}</div>;
 }

@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import { net } from "electron";
 import { SUPPORTED_AUDIO_EXTENSIONS } from "../utils/formats.js";
+import { getCoversDirectory } from "../utils/paths.js";
 import {
   deleteBook as dbDeleteBook,
   filePathExists,
@@ -10,6 +12,7 @@ import {
   getFilesByBook,
   getProgressByBook,
   listFilePathsWithBookIds,
+  updateBookMetadata as dbUpdateBookMetadata,
   upsertBook,
   upsertChapter,
   upsertFile,
@@ -278,6 +281,21 @@ async function appendFilesToBook(bookId: number, sorted: ParsedFile[]): Promise<
   });
 }
 
+function parseTagsFromRow(tagsJson: string | null | undefined): string[] {
+  if (!tagsJson) {
+    return [];
+  }
+  try {
+    const v = JSON.parse(tagsJson) as unknown;
+    if (!Array.isArray(v)) {
+      return [];
+    }
+    return v.filter((x): x is string => typeof x === "string");
+  } catch {
+    return [];
+  }
+}
+
 function rowToListItem(
   row: ReturnType<typeof getAllBooksWithProgress>[number],
 ): BookListItem {
@@ -300,6 +318,7 @@ function rowToListItem(
     position_seconds: pos,
     completed_at: row.completed_at,
     progress_percent,
+    tags: parseTagsFromRow(row.tags),
   };
 }
 
@@ -351,6 +370,15 @@ export function getLibrary(): BookListItem[] {
   return getAllBooksWithProgress().map(rowToListItem);
 }
 
+export function getBookListItemById(bookId: number): BookListItem | null {
+  for (const row of getAllBooksWithProgress()) {
+    if (row.id === bookId) {
+      return rowToListItem(row);
+    }
+  }
+  return null;
+}
+
 export function getBookDetail(bookId: number): BookDetailPayload | null {
   const book = getBookById(bookId);
   if (!book) {
@@ -373,8 +401,10 @@ export function getBookDetail(bookId: number): BookDetailPayload | null {
       series: book.series,
       series_order: book.series_order,
       cover_art_url: coverFileUrl(book.cover_art_path),
+      cover_art_path: book.cover_art_path,
       description: book.description,
       status: book.status,
+      tags: parseTagsFromRow(book.tags),
       date_added: book.date_added,
       total_duration: book.total_duration,
     },
@@ -403,6 +433,145 @@ export function getBookDetail(bookId: number): BookDetailPayload | null {
       : null,
     progress_percent,
   };
+}
+
+function fetchHttpBuffer(url: string): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    try {
+      const req = net.request(url);
+      req.on("response", (res) => {
+        if (res.statusCode !== 200) {
+          res.on("data", () => {});
+          resolve(null);
+          return;
+        }
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => {
+          chunks.push(Buffer.from(chunk));
+        });
+        res.on("end", () => {
+          resolve(Buffer.concat(chunks));
+        });
+        res.on("error", () => resolve(null));
+      });
+      req.on("error", () => resolve(null));
+      req.end();
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+/** Copies a user-selected image into `{userData}/covers/` when needed and returns the stored absolute path. */
+export function copyUserCoverToLibrary(
+  bookId: number,
+  sourcePath: string | null,
+  previousStoredPath: string | null,
+): string | null {
+  if (sourcePath === null) {
+    return null;
+  }
+  const normalized = path.normalize(sourcePath);
+  const normalizedPrev = previousStoredPath ? path.normalize(previousStoredPath) : null;
+  if (normalizedPrev && normalized === normalizedPrev) {
+    return normalizedPrev;
+  }
+  const coversDirNorm = path.normalize(getCoversDirectory());
+  if (normalized.startsWith(coversDirNorm)) {
+    return normalized;
+  }
+  if (!fs.existsSync(normalized)) {
+    return normalizedPrev;
+  }
+  const ext = path.extname(normalized).toLowerCase();
+  const destBase =
+    ext === ".png" ? `${bookId}.png` : ext === ".gif" ? `${bookId}.gif` : ext === ".webp" ? `${bookId}.webp` : `${bookId}.jpg`;
+  const dir = getCoversDirectory();
+  fs.mkdirSync(dir, { recursive: true });
+  const dest = path.join(dir, destBase);
+  fs.copyFileSync(normalized, dest);
+  return dest;
+}
+
+export async function fetchCoverArt(bookId: number): Promise<string | null> {
+  const book = getBookById(bookId);
+  if (!book) {
+    return null;
+  }
+  const title = book.title;
+  const author = book.author ?? "";
+
+  let imageData: Buffer | null = null;
+
+  try {
+    const searchUrl = `https://openlibrary.org/search.json?title=${encodeURIComponent(title)}&author=${encodeURIComponent(author)}&fields=cover_i&limit=1`;
+    const searchBuf = await fetchHttpBuffer(searchUrl);
+    if (searchBuf?.length) {
+      try {
+        const json = JSON.parse(searchBuf.toString("utf8")) as { docs?: { cover_i?: number }[] };
+        const coverId = json.docs?.[0]?.cover_i;
+        if (typeof coverId === "number") {
+          const coverUrl = `https://covers.openlibrary.org/b/id/${coverId}-L.jpg`;
+          const img = await fetchHttpBuffer(coverUrl);
+          if (img?.length) {
+            imageData = img;
+          }
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+
+  if (!imageData?.length) {
+    try {
+      const q = `intitle:${title}+inauthor:${author}`;
+      const volUrl = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=1`;
+      const volBuf = await fetchHttpBuffer(volUrl);
+      if (volBuf?.length) {
+        try {
+          const json = JSON.parse(volBuf.toString("utf8")) as {
+            items?: { volumeInfo?: { imageLinks?: { thumbnail?: string } } }[];
+          };
+          let thumb = json.items?.[0]?.volumeInfo?.imageLinks?.thumbnail;
+          if (thumb) {
+            thumb = thumb.includes("zoom=") ? thumb.replace(/zoom=\d+/gi, "zoom=3") : thumb;
+            const img = await fetchHttpBuffer(thumb);
+            if (img?.length) {
+              imageData = img;
+            }
+          }
+        } catch {
+          /* fall through */
+        }
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+
+  if (!imageData?.length) {
+    return null;
+  }
+
+  const dir = getCoversDirectory();
+  fs.mkdirSync(dir, { recursive: true });
+  const outPath = path.join(dir, `${bookId}.jpg`);
+  fs.writeFileSync(outPath, imageData);
+
+  dbUpdateBookMetadata(bookId, {
+    title: book.title,
+    author: book.author,
+    narrator: book.narrator,
+    series: book.series,
+    series_order: book.series_order,
+    description: book.description,
+    cover_art_path: outPath,
+  });
+
+  return outPath;
 }
 
 export function removeBook(bookId: number): void {

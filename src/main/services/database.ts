@@ -368,6 +368,62 @@ export function getBookById(id: number): BookRow | undefined {
   return db.prepare(`SELECT * FROM books WHERE id = ?`).get(id) as BookRow | undefined;
 }
 
+export type BookMetadataColumnUpdate = {
+  title: string;
+  author: string | null;
+  narrator: string | null;
+  series: string | null;
+  series_order: number | null;
+  description: string | null;
+  cover_art_path: string | null;
+};
+
+export function updateBookMetadata(bookId: number, fields: BookMetadataColumnUpdate): boolean {
+  const db = getDatabase();
+  const info = db
+    .prepare(
+      `UPDATE books SET title = ?, author = ?, narrator = ?, series = ?, series_order = ?, description = ?, cover_art_path = ? WHERE id = ?`,
+    )
+    .run(
+      fields.title,
+      fields.author ?? null,
+      fields.narrator ?? null,
+      fields.series ?? null,
+      fields.series_order ?? null,
+      fields.description ?? null,
+      fields.cover_art_path ?? null,
+      bookId,
+    );
+  return info.changes > 0;
+}
+
+export function updateBookStatus(bookId: number, status: string): boolean {
+  const db = getDatabase();
+  const info = db.prepare(`UPDATE books SET status = ? WHERE id = ?`).run(status, bookId);
+  return info.changes > 0;
+}
+
+export function updateBookTags(bookId: number, tags: string[]): boolean {
+  const db = getDatabase();
+  const info = db.prepare(`UPDATE books SET tags = ? WHERE id = ?`).run(JSON.stringify(tags), bookId);
+  return info.changes > 0;
+}
+
+export function getSetting(key: string): string | null {
+  const db = getDatabase();
+  const row = db.prepare(`SELECT value FROM settings WHERE key = ?`).get(key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function setSetting(key: string, value: string | null): void {
+  const db = getDatabase();
+  if (value === null || value === "") {
+    db.prepare(`DELETE FROM settings WHERE key = ?`).run(key);
+    return;
+  }
+  db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`).run(key, value);
+}
+
 export function getFilesByBook(bookId: number): FileRow[] {
   const db = getDatabase();
   return db

@@ -114,6 +114,7 @@ function toBookListItem(detail: BookDetailPayload): BookListItem {
     cover_art_url: book.cover_art_url,
     description: book.description,
     status: book.status,
+    tags: book.tags,
     date_added: book.date_added,
     total_duration: book.total_duration,
     position_seconds: prog?.position_seconds ?? 0,

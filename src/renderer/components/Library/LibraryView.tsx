@@ -4,11 +4,14 @@ import {
   type ReactElement,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
+import { computeFilteredBooks } from "../../store/libraryStore.js";
 import { useLibrary } from "../../hooks/useLibrary.js";
 import { BookDetail } from "./BookDetail.js";
+import { FilterBar } from "./FilterBar.js";
 import { LibraryGrid } from "./LibraryGrid.js";
 import { LibraryList } from "./LibraryList.js";
 
@@ -34,6 +37,7 @@ export function LibraryView(): ReactElement {
     isLoading,
     viewMode,
     selectedBookId,
+    filters,
     setViewMode,
     setSelectedBook,
     addPaths,
@@ -43,6 +47,8 @@ export function LibraryView(): ReactElement {
 
   const [dragActive, setDragActive] = useState(false);
   const dragDepth = useRef(0);
+
+  const filteredBooks = useMemo(() => computeFilteredBooks(books, filters), [books, filters]);
 
   useEffect(() => {
     void refreshLibrary();
@@ -136,6 +142,8 @@ export function LibraryView(): ReactElement {
         </div>
       </div>
 
+      <FilterBar books={books} />
+
       {isLoading && books.length === 0 ? (
         <p style={{ color: "#888" }}>Loading library…</p>
       ) : null}
@@ -165,14 +173,16 @@ export function LibraryView(): ReactElement {
 
         {viewMode === "grid" ? (
           <LibraryGrid
-            books={books}
+            books={filteredBooks}
+            groupBySeries={filters.groupBySeries}
             dragActive={dragActive}
             onBrowse={() => void onBrowse()}
             onBookClick={(id) => setSelectedBook(id)}
           />
         ) : (
           <LibraryList
-            books={books}
+            books={filteredBooks}
+            groupBySeries={filters.groupBySeries}
             dragActive={dragActive}
             onBrowse={() => void onBrowse()}
             onBookClick={(id) => setSelectedBook(id)}
