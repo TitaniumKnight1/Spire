@@ -1,0 +1,11 @@
+node_modules/
+dist/
+out/
+.env
+.env.*
+*.log
+.DS_Store
+Thumbs.db
+src/renderer/dist/
+*.db
+binaries/yt-dlp.exe

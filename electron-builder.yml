@@ -1,0 +1,25 @@
+appId: io.spire.app
+productName: Spire
+directories:
+  output: dist
+  buildResources: assets
+files:
+  - dist/**/*
+  - assets/**/*
+  - package.json
+extraResources:
+  - from: binaries
+    to: binaries
+    filter:
+      - "**/*"
+win:
+  icon: assets/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
