@@ -2,19 +2,94 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*.*.*"
+    branches:
+      - main
 
 jobs:
   release:
     runs-on: windows-latest
     permissions:
       contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
+
+      - name: Compute version and tag
+        id: versioning
+        shell: pwsh
+        run: |
+          $latestTag = gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>$null
+          if ($LASTEXITCODE -ne 0) { $latestTag = "" }
+          if (-not $latestTag -or $latestTag -eq "null") { $latestTag = "v0.0.0" }
+          $latestTag = $latestTag.Trim()
+
+          if (-not ($latestTag -match '^v(\d+)\.(\d+)\.(\d+)$')) {
+            Write-Host "Latest tag did not match vX.Y.Z; defaulting to v0.0.0"
+            $latestTag = "v0.0.0"
+          }
+          $null = $latestTag -match '^v(\d+)\.(\d+)\.(\d+)$'
+          $major = [int]$Matches[1]
+          $minor = [int]$Matches[2]
+          $patch = [int]$Matches[3]
+
+          if ($latestTag -eq "v0.0.0") {
+            $commits = @(git log --pretty=format:"%s" --no-merges)
+          } else {
+            $commits = @(git log "$latestTag..HEAD" --pretty=format:"%s" --no-merges)
+          }
+
+          if ($commits.Count -eq 0) {
+            Write-Host "No new commits since last release. Skipping."
+            echo "SKIP=true" >> $env:GITHUB_ENV
+            exit 0
+          }
+
+          echo "PREVIOUS_TAG=$latestTag" >> $env:GITHUB_ENV
+
+          $logRange = if ($latestTag -eq "v0.0.0") { "" } else { "$latestTag..HEAD" }
+          $bump = "patch"
+          if ($logRange) {
+            $hasBreaking = git log $logRange --grep="BREAKING CHANGE" --fixed-strings --pretty=format:%h --no-merges 2>$null
+          } else {
+            $hasBreaking = git log --grep="BREAKING CHANGE" --fixed-strings --pretty=format:%h --no-merges 2>$null
+          }
+          if (-not [string]::IsNullOrWhiteSpace($hasBreaking)) { $bump = "major" }
+
+          if ($bump -ne "major") {
+            foreach ($c in $commits) {
+              if ($c -match "^feat!:") { $bump = "major"; break }
+            }
+          }
+          if ($bump -ne "major") {
+            foreach ($c in $commits) {
+              if ($c -match "^feat(\(.+\))!:") { $bump = "major"; break }
+            }
+          }
+          if ($bump -ne "major") {
+            foreach ($c in $commits) {
+              if ($c -match "^feat(\(.+\))?:") { $bump = "minor"; break }
+            }
+          }
+
+          switch ($bump) {
+            "major" { $major++; $minor = 0; $patch = 0 }
+            "minor" { $minor++; $patch = 0 }
+            default { $patch++ }
+          }
+
+          $newVersion = "v$major.$minor.$patch"
+          echo "NEW_VERSION=$newVersion" >> $env:GITHUB_ENV
+          echo "version=$newVersion" >> $env:GITHUB_OUTPUT
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag $newVersion
+          git push origin $newVersion
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -23,28 +98,32 @@ jobs:
           cache: "npm"
 
       - name: Download yt-dlp
+        if: env.SKIP != 'true'
         run: |
           New-Item -ItemType Directory -Force -Path binaries
           Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile "binaries/yt-dlp.exe"
         shell: pwsh
 
       - name: Install dependencies
+        if: env.SKIP != 'true'
         run: npm ci
 
       - name: Build
+        if: env.SKIP != 'true'
         run: npm run build
 
       - name: Generate release notes
         id: release_notes
+        if: env.SKIP != 'true'
+        shell: pwsh
         run: |
-          $prevTag = git describe --tags --abbrev=0 HEAD^ 2>$null
-          if ($LASTEXITCODE -ne 0) { $prevTag = "" }
+          $prevTag = $env:PREVIOUS_TAG
+          if (-not $prevTag) { $prevTag = "v0.0.0" }
 
-          $logArgs = if ($prevTag) { "$prevTag..HEAD" } else { "HEAD" }
-          if ($prevTag) {
-            $commits = @(git log $logArgs --pretty=format:"%s" --no-merges)
-          } else {
+          if ($prevTag -eq "v0.0.0") {
             $commits = @(git log --pretty=format:"%s" --no-merges)
+          } else {
+            $commits = @(git log "$prevTag..HEAD" --pretty=format:"%s" --no-merges)
           }
 
           $features = @()
@@ -68,15 +147,17 @@ jobs:
           echo "RELEASE_NOTES<<EOF" >> $env:GITHUB_OUTPUT
           echo $notes >> $env:GITHUB_OUTPUT
           echo "EOF" >> $env:GITHUB_OUTPUT
-        shell: pwsh
 
       - name: Create release
+        if: env.SKIP != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          name: "Spire ${{ github.ref_name }}"
+          tag_name: ${{ steps.versioning.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: "Spire ${{ steps.versioning.outputs.version }}"
           body: ${{ steps.release_notes.outputs.RELEASE_NOTES }}
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
+          prerelease: ${{ contains(steps.versioning.outputs.version, '-beta') || contains(steps.versioning.outputs.version, '-alpha') }}
           files: |
             dist/*.exe
             dist/*.blockmap
