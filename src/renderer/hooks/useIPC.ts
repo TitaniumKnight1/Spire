@@ -37,11 +37,13 @@ export function useIPC(): {
       if (domain === "library") {
         return Promise.resolve({ ok: true, domain: "library" as const });
       }
+      if (domain === "downloads") {
+        return Promise.resolve({ ok: true, domain: "downloads" as const });
+      }
       const channelMap = {
-        downloads: IPC_CHANNELS.downloads.STUB,
-        podcasts: IPC_CHANNELS.playback.STUB,
+        podcasts: IPC_CHANNELS.settings.STUB,
         settings: IPC_CHANNELS.settings.STUB,
-      } as const satisfies Record<"downloads" | "podcasts" | "settings", IpcInvokeChannel>;
+      } as const satisfies Record<"podcasts" | "settings", IpcInvokeChannel>;
 
       return invoke<IpcStubResult>(channelMap[domain]);
     },

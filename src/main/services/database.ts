@@ -4,10 +4,10 @@ import Database from "better-sqlite3";
 
 type SqliteDatabase = InstanceType<typeof Database>;
 import { app } from "electron";
-import { getDatabasePath, getLibraryDirectory } from "../utils/paths.js";
+import { getDatabasePath, getLibraryDirectory, getStagingDirectoryRoot } from "../utils/paths.js";
 
 const SCHEMA_VERSION_KEY = "schema_version";
-const CURRENT_SCHEMA_VERSION = "1";
+const CURRENT_SCHEMA_VERSION = "2";
 
 const MIGRATION_SQL = `
 CREATE TABLE IF NOT EXISTS books (
@@ -69,7 +69,9 @@ CREATE TABLE IF NOT EXISTS downloads (
   progress_pct REAL DEFAULT 0,
   book_id INTEGER REFERENCES books(id),
   started_at TEXT,
-  completed_at TEXT
+  completed_at TEXT,
+  torrent_info_hash TEXT,
+  display_name TEXT
 );
 
 CREATE TABLE IF NOT EXISTS podcast_feeds (
@@ -88,6 +90,19 @@ CREATE TABLE IF NOT EXISTS settings (
 
 let dbInstance: SqliteDatabase | null = null;
 
+function migrateDatabaseSchema(db: SqliteDatabase, fromVersion: string): void {
+  if (fromVersion === "1") {
+    const cols = db.prepare(`PRAGMA table_info(downloads)`).all() as { name: string }[];
+    const names = new Set(cols.map((c) => c.name));
+    if (!names.has("torrent_info_hash")) {
+      db.exec(`ALTER TABLE downloads ADD COLUMN torrent_info_hash TEXT`);
+    }
+    if (!names.has("display_name")) {
+      db.exec(`ALTER TABLE downloads ADD COLUMN display_name TEXT`);
+    }
+  }
+}
+
 export function getDatabase(): SqliteDatabase {
   if (!dbInstance) {
     throw new Error("Database not initialized");
@@ -101,6 +116,7 @@ export function initializeDatabase(): void {
 
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   fs.mkdirSync(libraryDir, { recursive: true });
+  fs.mkdirSync(getStagingDirectoryRoot(), { recursive: true });
 
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
@@ -116,6 +132,9 @@ export function initializeDatabase(): void {
     db.prepare(
       "INSERT INTO settings (key, value) VALUES (?, ?)",
     ).run(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION);
+  } else if (row.value !== CURRENT_SCHEMA_VERSION) {
+    migrateDatabaseSchema(db, row.value);
+    db.prepare("UPDATE settings SET value = ? WHERE key = ?").run(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION);
   }
 
   dbInstance = db;
@@ -379,4 +398,184 @@ export function filePathExists(filePath: string): boolean {
 export function listFilePathsWithBookIds(): { book_id: number; file_path: string }[] {
   const db = getDatabase();
   return db.prepare(`SELECT book_id, file_path FROM files`).all() as { book_id: number; file_path: string }[];
+}
+
+export type BookmarkRow = {
+  id: number;
+  book_id: number;
+  file_id: number | null;
+  position_seconds: number | null;
+  note: string | null;
+  created_at: string | null;
+};
+
+export function getBookmarksByBook(bookId: number): BookmarkRow[] {
+  const db = getDatabase();
+  return db
+    .prepare(
+      `SELECT * FROM bookmarks WHERE book_id = ? ORDER BY datetime(created_at) DESC, id DESC`,
+    )
+    .all(bookId) as BookmarkRow[];
+}
+
+export type BookmarkInsert = {
+  book_id: number;
+  file_id: number | null;
+  position_seconds: number;
+  note?: string | null;
+};
+
+export function insertBookmark(row: BookmarkInsert): number {
+  const db = getDatabase();
+  const result = db
+    .prepare(
+      `INSERT INTO bookmarks (book_id, file_id, position_seconds, note) VALUES (?, ?, ?, ?)`,
+    )
+    .run(row.book_id, row.file_id, row.position_seconds, row.note ?? null);
+  return Number(result.lastInsertRowid);
+}
+
+export function deleteBookmarkById(id: number): boolean {
+  const db = getDatabase();
+  const info = db.prepare(`DELETE FROM bookmarks WHERE id = ?`).run(id);
+  return info.changes > 0;
+}
+
+export function savePlaybackProgress(
+  bookId: number,
+  currentFileId: number | null,
+  positionSeconds: number,
+  playbackSpeed: number,
+): void {
+  const existing = getProgressByBook(bookId);
+  const now = new Date().toISOString();
+  upsertProgress({
+    book_id: bookId,
+    current_file_id: currentFileId,
+    position_seconds: positionSeconds,
+    playback_speed: playbackSpeed,
+    last_listened_at: now,
+    completed_at: existing?.completed_at ?? null,
+  });
+}
+
+export function markBookPlaybackComplete(bookId: number): void {
+  const existing = getProgressByBook(bookId);
+  const now = new Date().toISOString();
+  upsertProgress({
+    book_id: bookId,
+    current_file_id: existing?.current_file_id ?? null,
+    position_seconds: existing?.position_seconds ?? 0,
+    playback_speed: existing?.playback_speed ?? 1,
+    last_listened_at: now,
+    completed_at: now,
+  });
+}
+
+// --- Downloads (torrent queue) ---
+
+export type DownloadInsert = {
+  source_url: string | null;
+  source_type: string;
+  status?: string;
+  progress_pct?: number;
+  display_name?: string | null;
+  torrent_info_hash?: string | null;
+};
+
+export type DownloadRow = {
+  id: number;
+  source_url: string | null;
+  source_type: string | null;
+  status: string;
+  progress_pct: number;
+  book_id: number | null;
+  started_at: string | null;
+  completed_at: string | null;
+  torrent_info_hash: string | null;
+  display_name: string | null;
+};
+
+export function insertDownload(row: DownloadInsert): number {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  const result = db
+    .prepare(
+      `INSERT INTO downloads (
+        source_url, source_type, status, progress_pct, started_at, display_name, torrent_info_hash
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      row.source_url,
+      row.source_type,
+      row.status ?? "queued",
+      row.progress_pct ?? 0,
+      now,
+      row.display_name ?? null,
+      row.torrent_info_hash ?? null,
+    );
+  return Number(result.lastInsertRowid);
+}
+
+export function updateDownloadStatus(id: number, status: string): void {
+  const db = getDatabase();
+  db.prepare(`UPDATE downloads SET status = ? WHERE id = ?`).run(status, id);
+}
+
+export function updateDownloadProgress(id: number, progress_pct: number): void {
+  const db = getDatabase();
+  db.prepare(`UPDATE downloads SET progress_pct = ? WHERE id = ?`).run(progress_pct, id);
+}
+
+export function updateDownloadBookId(id: number, bookId: number | null): void {
+  const db = getDatabase();
+  db.prepare(`UPDATE downloads SET book_id = ? WHERE id = ?`).run(bookId, id);
+}
+
+export function updateDownloadTorrentMeta(
+  id: number,
+  partial: { display_name?: string | null; torrent_info_hash?: string | null },
+): void {
+  const db = getDatabase();
+  if (partial.display_name !== undefined && partial.torrent_info_hash !== undefined) {
+    db.prepare(`UPDATE downloads SET display_name = ?, torrent_info_hash = ? WHERE id = ?`).run(
+      partial.display_name,
+      partial.torrent_info_hash,
+      id,
+    );
+    return;
+  }
+  if (partial.display_name !== undefined) {
+    db.prepare(`UPDATE downloads SET display_name = ? WHERE id = ?`).run(partial.display_name, id);
+  }
+  if (partial.torrent_info_hash !== undefined) {
+    db.prepare(`UPDATE downloads SET torrent_info_hash = ? WHERE id = ?`).run(partial.torrent_info_hash, id);
+  }
+}
+
+export function updateDownloadCompletedAt(id: number, completedAt: string | null): void {
+  const db = getDatabase();
+  db.prepare(`UPDATE downloads SET completed_at = ? WHERE id = ?`).run(completedAt, id);
+}
+
+export function resetDownloadForRetry(id: number): void {
+  const db = getDatabase();
+  db.prepare(
+    `UPDATE downloads SET status = 'queued', progress_pct = 0, completed_at = NULL, book_id = NULL,
+      torrent_info_hash = NULL, display_name = NULL WHERE id = ?`,
+  ).run(id);
+}
+
+export function getAllDownloads(): DownloadRow[] {
+  const db = getDatabase();
+  return db
+    .prepare(
+      `SELECT * FROM downloads ORDER BY datetime(started_at) DESC, id DESC`,
+    )
+    .all() as DownloadRow[];
+}
+
+export function getDownloadById(id: number): DownloadRow | undefined {
+  const db = getDatabase();
+  return db.prepare(`SELECT * FROM downloads WHERE id = ?`).get(id) as DownloadRow | undefined;
 }

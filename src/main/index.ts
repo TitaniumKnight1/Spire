@@ -1,11 +1,20 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { BrowserWindow, Menu, Tray, app, nativeImage } from "electron";
-import { registerDownloadsIpc } from "./ipc/downloads.js";
+import { BrowserWindow, Menu, Tray, app, globalShortcut, nativeImage } from "electron";
+import { IPC_CHANNELS } from "../shared/ipc-channels.js";
+import {
+  enqueueMagnetDownload,
+  flushPendingDownloadQueues,
+  queueMagnetForStartup,
+  queueTorrentFileForStartup,
+  registerDownloadsIpc,
+  setDownloadsBrowserWindow,
+} from "./ipc/downloads.js";
 import { registerLibraryIpc } from "./ipc/library.js";
 import { registerPlaybackIpc } from "./ipc/playback.js";
 import { registerSettingsIpc } from "./ipc/settings.js";
 import { initializeDatabase } from "./services/database.js";
+import { getTorrentManager } from "./services/torrent.js";
 import { checkForUpdates } from "./services/updater.js";
 
 void checkForUpdates; // keep import for Milestone 9; do not invoke yet
@@ -16,6 +25,60 @@ const __dirname = path.dirname(__filename);
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", (_event, argv) => {
+    const magnet = argv.find((a) => typeof a === "string" && a.startsWith("magnet:"));
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+    if (magnet) {
+      void enqueueMagnetDownload(magnet).catch((e) => {
+        console.error("[spire] second-instance magnet failed:", e);
+      });
+    }
+  });
+
+  app.on("open-file", (event, filePath) => {
+    event.preventDefault();
+    if (filePath.toLowerCase().endsWith(".torrent")) {
+      queueTorrentFileForStartup(filePath);
+      if (app.isReady()) {
+        void flushPendingDownloadQueues();
+      }
+    }
+  });
+
+  void app.whenReady().then(async () => {
+    initializeDatabase();
+    registerAllIpc();
+
+    for (const arg of process.argv.slice(1)) {
+      if (typeof arg === "string" && arg.startsWith("magnet:")) {
+        queueMagnetForStartup(arg);
+      }
+    }
+
+    try {
+      app.setAsDefaultProtocolClient("magnet");
+    } catch (e) {
+      console.warn("[spire] setAsDefaultProtocolClient(magnet) failed:", e);
+    }
+
+    mainWindow = createMainWindow();
+    setDownloadsBrowserWindow(mainWindow);
+    await flushPendingDownloadQueues();
+    await getTorrentManager().resumeDownloadsAfterBoot();
+
+    createTray();
+    registerMediaKeyShortcuts();
+  });
+}
 
 function registerAllIpc(): void {
   registerLibraryIpc();
@@ -104,11 +167,35 @@ function createTray(): void {
   });
 }
 
-void app.whenReady().then(() => {
-  initializeDatabase();
-  registerAllIpc();
-  mainWindow = createMainWindow();
-  createTray();
+function registerMediaKeyShortcuts(): void {
+  const send = (action: "play-pause" | "next" | "prev") => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.playback.MEDIA_KEY, action);
+    }
+  };
+
+  const registrations: { accelerator: string; handler: () => void }[] = [
+    { accelerator: "MediaPlayPause", handler: () => send("play-pause") },
+    { accelerator: "MediaNextTrack", handler: () => send("next") },
+    { accelerator: "MediaPreviousTrack", handler: () => send("prev") },
+  ];
+
+  for (const { accelerator, handler } of registrations) {
+    try {
+      const ok = globalShortcut.register(accelerator, handler);
+      if (!ok) {
+        console.warn(
+          `[spire] Global shortcut registration returned false for "${accelerator}" (another app may own this key).`,
+        );
+      }
+    } catch (e) {
+      console.warn(`[spire] Global shortcut registration failed for "${accelerator}":`, e);
+    }
+  }
+}
+
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
 });
 
 app.on("window-all-closed", () => {

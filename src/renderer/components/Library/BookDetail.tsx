@@ -2,7 +2,9 @@ import { type ReactElement, useCallback, useEffect, useState } from "react";
 import { IPC_CHANNELS } from "@shared/ipc-channels";
 import type { BookDetailPayload } from "@shared/library-types";
 import { useIPC } from "../../hooks/useIPC.js";
+import { usePlayer } from "../../hooks/usePlayer.js";
 import { useLibrary } from "../../hooks/useLibrary.js";
+import { usePlayerStore } from "../../store/playerStore.js";
 import { formatDuration } from "../../utils/formatDuration.js";
 
 function initials(title: string, author: string | null): string {
@@ -23,6 +25,9 @@ export function BookDetail({
 }): ReactElement {
   const { invoke } = useIPC();
   const { deleteBook } = useLibrary();
+  const { loadBook, play, pause } = usePlayer();
+  const currentBookId = usePlayerStore((s) => s.currentBook?.id ?? null);
+  const isPlaying = usePlayerStore((s) => s.isPlaying);
   const [detail, setDetail] = useState<BookDetailPayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,6 +60,22 @@ export function BookDetail({
     await deleteBook(bookId);
     onClose();
   }, [bookId, deleteBook, onClose]);
+
+  const activeHere = currentBookId === bookId;
+  const playingHere = activeHere && isPlaying;
+
+  const onPlayClick = useCallback(async () => {
+    if (playingHere) {
+      pause();
+      return;
+    }
+    if (activeHere && !isPlaying) {
+      play();
+      return;
+    }
+    await loadBook(bookId);
+    play();
+  }, [activeHere, bookId, isPlaying, loadBook, pause, play, playingHere]);
 
   if (loading) {
     return (
@@ -238,18 +259,17 @@ export function BookDetail({
             <div style={{ display: "flex", gap: 12, marginTop: "auto", paddingTop: 16 }}>
               <button
                 type="button"
-                disabled
-                title="Playback in Milestone 3"
+                onClick={() => void onPlayClick()}
                 style={{
                   padding: "10px 20px",
                   borderRadius: 8,
                   border: "1px solid #333",
-                  background: "#222",
-                  color: "#666",
-                  cursor: "not-allowed",
+                  background: playingHere ? "#1a3a1a" : "#2a6cff22",
+                  color: playingHere ? "#8d8" : "#e8e8e8",
+                  cursor: "pointer",
                 }}
               >
-                Play
+                {playingHere ? "Playing… (pause)" : activeHere && !isPlaying ? "Resume" : "Play"}
               </button>
               <button
                 type="button"

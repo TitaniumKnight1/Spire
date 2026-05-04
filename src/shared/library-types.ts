@@ -25,9 +25,40 @@ export type BookFileItem = {
 
 export type BookChapterItem = {
   id: number;
+  file_id: number;
   title: string | null;
   start_time: number | null;
   end_time: number | null;
+};
+
+/** Chapter for playback UI (alias of persisted chapter row shape). */
+export type Chapter = BookChapterItem;
+
+export type Bookmark = {
+  id: number;
+  book_id: number;
+  file_id: number | null;
+  position_seconds: number;
+  note: string | null;
+  created_at: string | null;
+};
+
+export type SleepTimerMode = "minutes" | "end-of-chapter" | "end-of-book";
+
+export type SleepTimerState = {
+  mode: SleepTimerMode;
+  minutes?: number;
+  endsAt?: number;
+};
+
+/** Snapshot of playback for UI (subset of store). */
+export type PlaybackState = {
+  isPlaying: boolean;
+  position: number;
+  duration: number;
+  speed: number;
+  currentFileIndex: number;
+  currentChapterIndex: number;
 };
 
 export type BookProgressItem = {
@@ -63,6 +94,8 @@ export type LibraryIngestResult = {
   success: boolean;
   booksAdded: number;
   errors: string[];
+  /** Set when new books are created or updated during ingest (best-effort). */
+  bookIds: number[];
 };
 
 export type LibraryDeleteResult = {
@@ -72,4 +105,38 @@ export type LibraryDeleteResult = {
 export type LibraryOpenDialogResult = {
   canceled: boolean;
   paths: string[];
+};
+
+export type DownloadSourceType = "magnet" | "torrent_file";
+
+export type DownloadStatus =
+  | "queued"
+  | "downloading"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+/** Renderer-safe download row (hydrated from DB + pushed progress fields). */
+export type DownloadItem = {
+  id: number;
+  source_type: DownloadSourceType;
+  status: DownloadStatus;
+  progress_pct: number;
+  book_id: number | null;
+  started_at: string | null;
+  completed_at: string | null;
+  display_name: string | null;
+  speed_bps: number;
+  eta_seconds: number | null;
+};
+
+/** Main → renderer pushed payload (no filesystem paths). */
+export type TorrentProgress = {
+  id: number;
+  name: string;
+  progress_pct: number;
+  speed: number;
+  status: string;
+  eta: number | null;
 };

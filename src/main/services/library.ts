@@ -307,11 +307,13 @@ export async function ingestPaths(paths: string[]): Promise<{
   success: boolean;
   booksAdded: number;
   errors: string[];
+  bookIds: number[];
 }> {
   const errors: string[] = [];
+  const bookIds: number[] = [];
   const expanded = expandInputPaths(paths);
   if (expanded.length === 0) {
-    return { success: true, booksAdded: 0, errors };
+    return { success: true, booksAdded: 0, errors, bookIds };
   }
 
   const clusters = clusterByParentDir(expanded);
@@ -334,13 +336,15 @@ export async function ingestPaths(paths: string[]): Promise<{
 
     if (existingBookId != null) {
       await appendFilesToBook(existingBookId, sorted);
+      bookIds.push(existingBookId);
     } else {
-      await createBookFromParsed(sorted);
+      const id = await createBookFromParsed(sorted);
       booksAdded += 1;
+      bookIds.push(id);
     }
   }
 
-  return { success: errors.length === 0, booksAdded, errors };
+  return { success: errors.length === 0, booksAdded, errors, bookIds };
 }
 
 export function getLibrary(): BookListItem[] {
@@ -382,6 +386,7 @@ export function getBookDetail(bookId: number): BookDetailPayload | null {
     })),
     chapters: chapters.map((c) => ({
       id: c.id,
+      file_id: c.file_id,
       title: c.title,
       start_time: c.start_time,
       end_time: c.end_time,

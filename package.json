@@ -15,6 +15,8 @@
     "tsc": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "howler": "^2.2.4",
+    "webtorrent": "^2.8.3",
     "better-sqlite3": "^11.10.0",
     "electron-updater": "^6.6.2",
     "music-metadata": "^11.0.0",
