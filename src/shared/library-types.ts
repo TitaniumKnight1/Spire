@@ -107,7 +107,7 @@ export type LibraryOpenDialogResult = {
   paths: string[];
 };
 
-export type DownloadSourceType = "magnet" | "torrent_file";
+export type DownloadSourceType = "magnet" | "torrent_file" | "http" | "ytdlp" | "rss";
 
 export type DownloadStatus =
   | "queued"
@@ -129,6 +129,8 @@ export type DownloadItem = {
   display_name: string | null;
   speed_bps: number;
   eta_seconds: number | null;
+  /** Present when status is failed after URL / yt-dlp errors */
+  error_message: string | null;
 };
 
 /** Main → renderer pushed payload (no filesystem paths). */
@@ -139,4 +141,30 @@ export type TorrentProgress = {
   speed: number;
   status: string;
   eta: number | null;
+};
+
+/** Parsed RSS/Atom episode for IPC (not persisted). */
+export type RssEpisode = {
+  title: string;
+  url: string;
+  duration: number | null;
+  pubDate: string | null;
+  description: string | null;
+};
+
+/** Feed preview / episode list payload from {@link IPC_CHANNELS.rss.FETCH_FEED}. */
+export type RssFeedPayload = {
+  title: string;
+  description: string | null;
+  coverUrl: string | null;
+  episodes: RssEpisode[];
+};
+
+/** Saved podcast_feeds row (IPC-safe). */
+export type SavedPodcastFeed = {
+  id: number;
+  title: string | null;
+  feed_url: string;
+  last_fetched: string | null;
+  cover_art_url: string | null;
 };

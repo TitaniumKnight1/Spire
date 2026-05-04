@@ -29,6 +29,27 @@ function formatEta(seconds: number | null): string {
   return `${m} min ${s} sec`;
 }
 
+function sourceBadgeStyle(source: DownloadItem["source_type"]): { bg: string; label: string } {
+  switch (source) {
+    case "magnet":
+      return { bg: "#3d3d3d", label: "Magnet" };
+    case "torrent_file":
+      return { bg: "#4a4a2a", label: "Torrent" };
+    case "http":
+      return { bg: "#0d6e5c", label: "HTTP" };
+    case "ytdlp":
+      return { bg: "#8f2d56", label: "yt-dlp" };
+    case "rss":
+      return { bg: "#634d8b", label: "RSS" };
+    default:
+      return { bg: "#444", label: source };
+  }
+}
+
+function isTorrentSource(source: DownloadItem["source_type"]): boolean {
+  return source === "magnet" || source === "torrent_file";
+}
+
 function statusBadgeStyle(status: DownloadStatus): { bg: string; label: string } {
   switch (status) {
     case "queued":
@@ -51,6 +72,9 @@ export type DownloadQueueProps = {
   isLoading: boolean;
   addMagnet: (uri: string) => Promise<{ downloadId: number }>;
   addTorrentFile: (filePath: string) => Promise<{ downloadId: number }>;
+  addUrl: (url: string) => Promise<{ downloadId: number }>;
+  /** Opens Podcasts flow (e.g. add saved RSS feed). */
+  onOpenPodcasts?: () => void;
   pause: (id: number) => Promise<void>;
   resume: (id: number) => Promise<void>;
   cancel: (id: number) => Promise<void>;
@@ -59,10 +83,30 @@ export type DownloadQueueProps = {
 
 export function DownloadQueue(props: DownloadQueueProps): ReactElement {
   const [magnetInput, setMagnetInput] = useState("");
+  const [urlInput, setUrlInput] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const queueRows = props.downloads.filter((d) => queueStatuses.includes(d.status));
+
+  const onSubmitUrl = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault();
+      setError(null);
+      const raw = urlInput.trim();
+      if (!raw) {
+        setError("Paste a URL");
+        return;
+      }
+      try {
+        await props.addUrl(raw);
+        setUrlInput("");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not add URL");
+      }
+    },
+    [urlInput, props],
+  );
 
   const onSubmitMagnet = useCallback(
     async (e: FormEvent) => {
@@ -124,7 +168,7 @@ export function DownloadQueue(props: DownloadQueueProps): ReactElement {
       }}
     >
       <h2 style={{ marginTop: 0, fontSize: 18 }}>Download queue</h2>
-      <form onSubmit={onSubmitMagnet} style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+      <form onSubmit={onSubmitMagnet} style={{ display: "flex", gap: 8, marginBottom: 10 }}>
         <input
           type="text"
           value={magnetInput}
@@ -153,6 +197,51 @@ export function DownloadQueue(props: DownloadQueueProps): ReactElement {
           Add
         </button>
       </form>
+      <form onSubmit={onSubmitUrl} style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+        <input
+          type="text"
+          value={urlInput}
+          onChange={(e) => setUrlInput(e.target.value)}
+          placeholder="Paste audio or video URL (direct .mp3, YouTube, etc.)…"
+          style={{
+            flex: "1 1 240px",
+            padding: "10px 12px",
+            borderRadius: 8,
+            border: "1px solid #333",
+            background: "#0f0f0f",
+            color: "#e8e8e8",
+          }}
+        />
+        <button
+          type="submit"
+          style={{
+            padding: "10px 18px",
+            borderRadius: 8,
+            border: "1px solid #444",
+            background: "#1c1c1c",
+            color: "#e8e8e8",
+            cursor: "pointer",
+          }}
+        >
+          Download URL
+        </button>
+        {props.onOpenPodcasts ? (
+          <button
+            type="button"
+            onClick={() => props.onOpenPodcasts?.()}
+            style={{
+              padding: "10px 18px",
+              borderRadius: 8,
+              border: "1px solid #634d8b",
+              background: "#1a1520",
+              color: "#e8e8e8",
+              cursor: "pointer",
+            }}
+          >
+            Add RSS feed
+          </button>
+        ) : null}
+      </form>
       {error ? (
         <p style={{ color: "#f66", marginTop: 0 }}>{error}</p>
       ) : null}
@@ -163,7 +252,7 @@ export function DownloadQueue(props: DownloadQueueProps): ReactElement {
 
       {!props.isLoading && queueRows.length === 0 ? (
         <p style={{ color: "#9a9a9a", marginBottom: 0 }}>
-          Paste a magnet link or drop a .torrent file to start downloading.
+          Paste a magnet, a URL, or drop a .torrent file. Use RSS feeds from Podcasts.
         </p>
       ) : null}
 
@@ -171,8 +260,10 @@ export function DownloadQueue(props: DownloadQueueProps): ReactElement {
         {queueRows.map((d) => {
           const name = d.display_name?.trim() || "Loading…";
           const badge = statusBadgeStyle(d.status);
+          const srcBadge = sourceBadgeStyle(d.source_type);
           const showSpeed = d.status === "downloading" && d.speed_bps > 0;
           const etaStr = showSpeed ? formatEta(d.eta_seconds) : "";
+          const torrent = isTorrentSource(d.source_type);
 
           return (
             <li
@@ -186,19 +277,36 @@ export function DownloadQueue(props: DownloadQueueProps): ReactElement {
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
                 <div style={{ fontWeight: 600, minWidth: 0, flex: 1 }}>{name}</div>
-                <span
-                  style={{
-                    fontSize: 12,
-                    padding: "2px 8px",
-                    borderRadius: 999,
-                    background: badge.bg,
-                    color: "#fff",
-                    flexShrink: 0,
-                  }}
-                >
-                  {badge.label}
-                </span>
+                <div style={{ display: "flex", gap: 6, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      background: srcBadge.bg,
+                      color: "#fff",
+                    }}
+                  >
+                    {srcBadge.label}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      background: badge.bg,
+                      color: "#fff",
+                    }}
+                  >
+                    {badge.label}
+                  </span>
+                </div>
               </div>
+              {d.status === "failed" && d.error_message ? (
+                <div style={{ marginTop: 8, fontSize: 13, color: "#f98f8f", whiteSpace: "pre-wrap" }}>
+                  {d.error_message}
+                </div>
+              ) : null}
               <div
                 style={{
                   marginTop: 8,
@@ -224,12 +332,12 @@ export function DownloadQueue(props: DownloadQueueProps): ReactElement {
                 </div>
               ) : null}
               <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {d.status === "downloading" ? (
+                {d.status === "downloading" && torrent ? (
                   <button type="button" onClick={() => void props.pause(d.id)} style={smallBtn}>
                     Pause
                   </button>
                 ) : null}
-                {d.status === "paused" ? (
+                {d.status === "paused" && torrent ? (
                   <button type="button" onClick={() => void props.resume(d.id)} style={smallBtn}>
                     Resume
                   </button>

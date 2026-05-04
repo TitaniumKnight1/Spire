@@ -14,7 +14,7 @@ function getIpc(): ElectronIpc {
   return bridge;
 }
 
-export type IpcStubResult = { ok: boolean; domain: "library" | "downloads" | "playback" | "settings" };
+export type IpcStubResult = { ok: boolean; domain: "library" | "downloads" | "playback" | "settings" | "podcasts" };
 
 export function useIPC(): {
   invoke: <T = unknown>(channel: IpcInvokeChannel, ...args: unknown[]) => Promise<T>;
@@ -40,10 +40,12 @@ export function useIPC(): {
       if (domain === "downloads") {
         return Promise.resolve({ ok: true, domain: "downloads" as const });
       }
+      if (domain === "podcasts") {
+        return Promise.resolve({ ok: true, domain: "podcasts" as const });
+      }
       const channelMap = {
-        podcasts: IPC_CHANNELS.settings.STUB,
         settings: IPC_CHANNELS.settings.STUB,
-      } as const satisfies Record<"podcasts" | "settings", IpcInvokeChannel>;
+      } as const satisfies Record<"settings", IpcInvokeChannel>;
 
       return invoke<IpcStubResult>(channelMap[domain]);
     },

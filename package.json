@@ -15,13 +15,14 @@
     "tsc": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "howler": "^2.2.4",
-    "webtorrent": "^2.8.3",
     "better-sqlite3": "^11.10.0",
     "electron-updater": "^6.6.2",
+    "fast-xml-parser": "^5.7.2",
+    "howler": "^2.2.4",
     "music-metadata": "^11.0.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "webtorrent": "^2.8.3",
     "zustand": "^5.0.5"
   },
   "devDependencies": {

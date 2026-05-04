@@ -7,7 +7,7 @@ import { app } from "electron";
 import { getDatabasePath, getLibraryDirectory, getStagingDirectoryRoot } from "../utils/paths.js";
 
 const SCHEMA_VERSION_KEY = "schema_version";
-const CURRENT_SCHEMA_VERSION = "2";
+const CURRENT_SCHEMA_VERSION = "3";
 
 const MIGRATION_SQL = `
 CREATE TABLE IF NOT EXISTS books (
@@ -71,7 +71,8 @@ CREATE TABLE IF NOT EXISTS downloads (
   started_at TEXT,
   completed_at TEXT,
   torrent_info_hash TEXT,
-  display_name TEXT
+  display_name TEXT,
+  error_message TEXT
 );
 
 CREATE TABLE IF NOT EXISTS podcast_feeds (
@@ -99,6 +100,13 @@ function migrateDatabaseSchema(db: SqliteDatabase, fromVersion: string): void {
     }
     if (!names.has("display_name")) {
       db.exec(`ALTER TABLE downloads ADD COLUMN display_name TEXT`);
+    }
+  }
+  {
+    const cols = db.prepare(`PRAGMA table_info(downloads)`).all() as { name: string }[];
+    const names = new Set(cols.map((c) => c.name));
+    if (!names.has("error_message")) {
+      db.exec(`ALTER TABLE downloads ADD COLUMN error_message TEXT`);
     }
   }
 }
@@ -494,6 +502,7 @@ export type DownloadRow = {
   completed_at: string | null;
   torrent_info_hash: string | null;
   display_name: string | null;
+  error_message: string | null;
 };
 
 export function insertDownload(row: DownloadInsert): number {
@@ -502,8 +511,8 @@ export function insertDownload(row: DownloadInsert): number {
   const result = db
     .prepare(
       `INSERT INTO downloads (
-        source_url, source_type, status, progress_pct, started_at, display_name, torrent_info_hash
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        source_url, source_type, status, progress_pct, started_at, display_name, torrent_info_hash, error_message
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       row.source_url,
@@ -513,6 +522,7 @@ export function insertDownload(row: DownloadInsert): number {
       now,
       row.display_name ?? null,
       row.torrent_info_hash ?? null,
+      null,
     );
   return Number(result.lastInsertRowid);
 }
@@ -562,8 +572,61 @@ export function resetDownloadForRetry(id: number): void {
   const db = getDatabase();
   db.prepare(
     `UPDATE downloads SET status = 'queued', progress_pct = 0, completed_at = NULL, book_id = NULL,
-      torrent_info_hash = NULL, display_name = NULL WHERE id = ?`,
+      torrent_info_hash = NULL, display_name = NULL, error_message = NULL WHERE id = ?`,
   ).run(id);
+}
+
+export function updateDownloadError(id: number, message: string): void {
+  const db = getDatabase();
+  db.prepare(`UPDATE downloads SET status = 'failed', error_message = ?, progress_pct = ? WHERE id = ?`).run(
+    message,
+    0,
+    id,
+  );
+}
+
+export type PodcastFeedRow = {
+  id: number;
+  title: string | null;
+  feed_url: string;
+  last_fetched: string | null;
+  cover_art_path: string | null;
+};
+
+export function upsertPodcastFeed(input: {
+  feed_url: string;
+  title?: string | null;
+  cover_art_path?: string | null;
+}): PodcastFeedRow {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  const existing = db.prepare(`SELECT * FROM podcast_feeds WHERE feed_url = ?`).get(input.feed_url) as
+    | PodcastFeedRow
+    | undefined;
+  if (existing) {
+    db.prepare(
+      `UPDATE podcast_feeds SET title = ?, last_fetched = ?, cover_art_path = COALESCE(?, cover_art_path) WHERE id = ?`,
+    ).run(input.title ?? existing.title, now, input.cover_art_path ?? null, existing.id);
+    return db.prepare(`SELECT * FROM podcast_feeds WHERE id = ?`).get(existing.id) as PodcastFeedRow;
+  }
+  const result = db
+    .prepare(`INSERT INTO podcast_feeds (title, feed_url, last_fetched, cover_art_path) VALUES (?, ?, ?, ?)`)
+    .run(input.title ?? null, input.feed_url, now, input.cover_art_path ?? null);
+  const id = Number(result.lastInsertRowid);
+  return db.prepare(`SELECT * FROM podcast_feeds WHERE id = ?`).get(id) as PodcastFeedRow;
+}
+
+export function getAllPodcastFeeds(): PodcastFeedRow[] {
+  const db = getDatabase();
+  return db
+    .prepare(`SELECT * FROM podcast_feeds ORDER BY title COLLATE NOCASE ASC, id DESC`)
+    .all() as PodcastFeedRow[];
+}
+
+export function deletePodcastFeed(id: number): boolean {
+  const db = getDatabase();
+  const info = db.prepare(`DELETE FROM podcast_feeds WHERE id = ?`).run(id);
+  return info.changes > 0;
 }
 
 export function getAllDownloads(): DownloadRow[] {

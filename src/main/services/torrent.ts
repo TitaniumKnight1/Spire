@@ -171,6 +171,10 @@ export class TorrentManager extends EventEmitter {
       if (row.status !== "queued" && row.status !== "downloading") {
         continue;
       }
+      const st = row.source_type ?? "";
+      if (st !== "magnet" && st !== "torrent_file") {
+        continue;
+      }
       if (this.activeDownloads.has(row.id)) {
         continue;
       }

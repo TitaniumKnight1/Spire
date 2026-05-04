@@ -30,6 +30,7 @@ export const useDownloadStore = create<DownloadState>((set) => ({
           display_name: item.display_name ?? null,
           speed_bps: item.speed_bps ?? 0,
           eta_seconds: item.eta_seconds ?? null,
+          error_message: item.error_message ?? null,
         };
         return { downloads: [base, ...state.downloads] };
       }

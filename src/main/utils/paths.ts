@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 
@@ -21,4 +22,19 @@ export function getStagingDirectoryRoot(): string {
 /** Directory for extracted cover art (`{bookId}.jpg` / `{bookId}.png`). */
 export function getCoversDirectory(): string {
   return path.join(getUserDataRoot(), "covers");
+}
+
+/**
+ * Path to bundled yt-dlp (dev: `<appPath>/binaries/yt-dlp.exe`, packaged: `<resources>/binaries/yt-dlp.exe`).
+ */
+export function getYtDlpPath(): string {
+  const binaryName = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
+  const base = app.isPackaged ? process.resourcesPath : app.getAppPath();
+  const resolved = path.join(base, "binaries", binaryName);
+  if (!fs.existsSync(resolved)) {
+    throw new Error(
+      `yt-dlp binary not found at "${resolved}". Place "${binaryName}" under the app's binaries folder (dev: project binaries/, packaged: resources/binaries/).`,
+    );
+  }
+  return resolved;
 }

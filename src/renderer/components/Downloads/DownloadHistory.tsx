@@ -40,7 +40,16 @@ function HistoryRow({
 }): ReactElement {
   const setSelectedBook = useLibraryStore((s) => s.setSelectedBook);
 
-  const sourceLabel = item.source_type === "torrent_file" ? "Torrent file" : "Magnet";
+  const sourceLabel =
+    item.source_type === "torrent_file"
+      ? "Torrent file"
+      : item.source_type === "http"
+        ? "HTTP"
+        : item.source_type === "ytdlp"
+          ? "yt-dlp"
+          : item.source_type === "rss"
+            ? "RSS"
+            : "Magnet";
   const when = item.completed_at ?? item.started_at ?? "";
   const title = item.display_name?.trim() || "Unknown torrent";
 

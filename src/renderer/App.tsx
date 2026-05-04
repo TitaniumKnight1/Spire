@@ -1,8 +1,10 @@
 import { type ReactElement, useMemo, useState } from "react";
+import type { SavedPodcastFeed } from "@shared/library-types";
 import { Bookmarks, ChapterList, PlayerBar } from "./components/Player/index.js";
 import { LibraryView } from "./components/Library/index.js";
 import { DownloadHistory } from "./components/Downloads/DownloadHistory.js";
 import { DownloadQueue } from "./components/Downloads/DownloadQueue.js";
+import { EpisodeList, FeedList } from "./components/Podcasts/index.js";
 import { useDownloads } from "./hooks/useDownloads.js";
 import { useIPC } from "./hooks/useIPC.js";
 import { usePlayerStore } from "./store/playerStore.js";
@@ -18,6 +20,7 @@ const NAV_ITEMS: { key: NavKey; label: string }[] = [
 
 export function App(): ReactElement {
   const [active, setActive] = useState<NavKey>("library");
+  const [podcastDetail, setPodcastDetail] = useState<SavedPodcastFeed | null>(null);
   const ipc = useIPC();
   const downloadsApi = useDownloads();
   const showChapterPanel = usePlayerStore((s) => s.showChapterPanel);
@@ -60,6 +63,9 @@ export function App(): ReactElement {
               type="button"
               onClick={() => {
                 setActive(item.key);
+                if (item.key === "podcasts") {
+                  setPodcastDetail(null);
+                }
                 void ipc.pingDomain(item.key);
               }}
               style={{
@@ -108,7 +114,17 @@ export function App(): ReactElement {
             position: "relative",
           }}
         >
-          <Outlet active={active} downloadsApi={downloadsApi} onSwitchToLibrary={() => setActive("library")} />
+          <Outlet
+            active={active}
+            downloadsApi={downloadsApi}
+            podcastDetail={podcastDetail}
+            onPodcastDetailChange={setPodcastDetail}
+            onNavigatePodcasts={() => {
+              setPodcastDetail(null);
+              setActive("podcasts");
+            }}
+            onSwitchToLibrary={() => setActive("library")}
+          />
           <ChapterList />
           <Bookmarks />
         </main>
@@ -121,10 +137,16 @@ export function App(): ReactElement {
 function Outlet({
   active,
   downloadsApi,
+  podcastDetail,
+  onPodcastDetailChange,
+  onNavigatePodcasts,
   onSwitchToLibrary,
 }: {
   active: NavKey;
   downloadsApi: ReturnType<typeof useDownloads>;
+  podcastDetail: SavedPodcastFeed | null;
+  onPodcastDetailChange: (feed: SavedPodcastFeed | null) => void;
+  onNavigatePodcasts: () => void;
   onSwitchToLibrary: () => void;
 }): ReactElement {
   if (active === "library") {
@@ -140,6 +162,8 @@ function Outlet({
           isLoading={downloadsApi.isLoading}
           addMagnet={downloadsApi.addMagnet}
           addTorrentFile={downloadsApi.addTorrentFile}
+          addUrl={downloadsApi.addUrl}
+          onOpenPodcasts={onNavigatePodcasts}
           pause={downloadsApi.pause}
           resume={downloadsApi.resume}
           cancel={downloadsApi.cancel}
@@ -151,8 +175,32 @@ function Outlet({
     );
   }
 
-  const titles: Record<Exclude<NavKey, "library" | "downloads">, string> = {
-    podcasts: "Podcasts",
+  if (active === "podcasts") {
+    if (podcastDetail) {
+      return (
+        <EpisodeList
+          feed={podcastDetail}
+          fetchFeed={downloadsApi.fetchFeed}
+          downloadEpisode={downloadsApi.downloadEpisode}
+          onBack={() => onPodcastDetailChange(null)}
+        />
+      );
+    }
+    return (
+      <div>
+        <h1 style={{ marginTop: 0, fontSize: 22 }}>Podcasts</h1>
+        <FeedList
+          fetchFeed={downloadsApi.fetchFeed}
+          getSavedFeeds={downloadsApi.getSavedFeeds}
+          saveFeed={downloadsApi.saveFeed}
+          deleteFeed={downloadsApi.deleteSavedFeed}
+          onOpenFeed={(feed) => onPodcastDetailChange(feed)}
+        />
+      </div>
+    );
+  }
+
+  const titles: Record<Exclude<NavKey, "library" | "downloads" | "podcasts">, string> = {
     settings: "Settings",
   };
 
