@@ -1,13 +1,4 @@
-import {
-  type CSSProperties,
-  type DragEvent,
-  type ReactElement,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { type DragEvent, type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { computeFilteredBooks } from "../../store/libraryStore.js";
 import { useLibrary } from "../../hooks/useLibrary.js";
 import { BookDetail } from "./BookDetail.js";
@@ -38,7 +29,6 @@ export function LibraryView(): ReactElement {
     viewMode,
     selectedBookId,
     filters,
-    setViewMode,
     setSelectedBook,
     addPaths,
     refreshLibrary,
@@ -111,41 +101,28 @@ export function LibraryView(): ReactElement {
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-        <h1 style={{ margin: 0, fontSize: 22 }}>Library</h1>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button type="button" onClick={() => void onBrowse()} style={btnStyle}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          marginBottom: 28,
+          flexWrap: "wrap",
+          gap: 16,
+        }}
+      >
+        <h1 className="page-title">Library</h1>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+          <button type="button" onClick={() => void onBrowse()} className="btn-primary">
             Add Files
           </button>
-          <div style={{ display: "flex", border: "1px solid #333", borderRadius: 8, overflow: "hidden" }}>
-            <button
-              type="button"
-              onClick={() => setViewMode("grid")}
-              style={{
-                ...toggleBtn,
-                background: viewMode === "grid" ? "#2a2a2a" : "#161616",
-              }}
-            >
-              Grid
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("list")}
-              style={{
-                ...toggleBtn,
-                background: viewMode === "list" ? "#2a2a2a" : "#161616",
-              }}
-            >
-              List
-            </button>
-          </div>
         </div>
       </div>
 
       <FilterBar books={books} />
 
       {isLoading && books.length === 0 ? (
-        <p style={{ color: "#888" }}>Loading library…</p>
+        <p style={{ color: "var(--text-muted)" }}>Loading library…</p>
       ) : null}
 
       <div style={{ position: "relative", flex: 1, minHeight: 0, overflow: "auto" }}>
@@ -155,16 +132,17 @@ export function LibraryView(): ReactElement {
               position: "absolute",
               inset: 0,
               zIndex: 5,
-              border: "2px dashed #4a8fd4",
-              borderRadius: 16,
-              background: "rgba(20, 30, 45, 0.85)",
+              border: "2px dashed var(--accent)",
+              borderRadius: "var(--radius-lg)",
+              background: "var(--accent-soft)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               pointerEvents: "none",
-              color: "#b8d4f0",
-              fontSize: 18,
-              fontWeight: 600,
+              color: "var(--accent)",
+              fontSize: 14,
+              fontWeight: 500,
+              transition: "all 150ms ease",
             }}
           >
             Drop to add
@@ -197,19 +175,3 @@ export function LibraryView(): ReactElement {
   );
 }
 
-const btnStyle: CSSProperties = {
-  padding: "8px 14px",
-  borderRadius: 8,
-  border: "1px solid #333",
-  background: "#1e1e1e",
-  color: "#e8e8e8",
-  cursor: "pointer",
-};
-
-const toggleBtn: CSSProperties = {
-  padding: "8px 14px",
-  border: "none",
-  color: "#e8e8e8",
-  cursor: "pointer",
-  fontSize: 13,
-};

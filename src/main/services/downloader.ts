@@ -5,6 +5,7 @@ import { finished } from "node:stream/promises";
 import type { BrowserWindow, ClientRequest, IncomingMessage } from "electron";
 import { net } from "electron";
 import { IPC_CHANNELS } from "../../shared/ipc-channels.js";
+import type { DownloadCompletedPush, DownloadProgressPush } from "../../shared/library-types.js";
 import {
   getDownloadById,
   getAllDownloads,
@@ -17,7 +18,6 @@ import {
 import { ingestPaths } from "./library.js";
 import { SUPPORTED_AUDIO_EXTENSIONS } from "../utils/formats.js";
 import { getStagingDirectoryRoot, getYtDlpPath } from "../utils/paths.js";
-import type { DownloadCompletedPush, DownloadProgressPush } from "./torrent.js";
 
 const AUDIO_EXT_SET = new Set<string>(SUPPORTED_AUDIO_EXTENSIONS);
 

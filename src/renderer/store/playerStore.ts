@@ -17,6 +17,8 @@ export type PlayerStoreState = {
   duration: number;
   isPlaying: boolean;
   speed: number;
+  /** mpv volume 0–100 (UI only; not persisted). */
+  volume: number;
   chapters: Chapter[];
   currentChapterIndex: number;
   bookmarks: Bookmark[];
@@ -25,6 +27,8 @@ export type PlayerStoreState = {
   showBookmarksPanel: boolean;
   skipSilenceEnabled: boolean;
   eqPreset: EqPreset;
+  /** Main-process file resolution / missing-file message for the current track. */
+  playbackError: string | null;
   setBook: (
     book: BookListItem,
     files: BookFileItem[],
@@ -37,6 +41,7 @@ export type PlayerStoreState = {
   setDuration: (seconds: number) => void;
   setIsPlaying: (playing: boolean) => void;
   setSpeed: (speed: number) => void;
+  setVolume: (level: number) => void;
   setChapters: (chapters: Chapter[]) => void;
   setBookmarks: (bookmarks: Bookmark[]) => void;
   setSleepTimer: (state: SleepTimerState | null) => void;
@@ -47,6 +52,7 @@ export type PlayerStoreState = {
   setSkipSilenceEnabled: (enabled: boolean) => void;
   toggleSkipSilence: () => void;
   setEqPreset: (preset: EqPreset) => void;
+  setPlaybackError: (message: string | null) => void;
   nextFile: () => void;
   prevFile: () => void;
 };
@@ -60,6 +66,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   duration: 0,
   isPlaying: false,
   speed: 1,
+  volume: 100,
   chapters: [],
   currentChapterIndex: -1,
   bookmarks: [],
@@ -68,6 +75,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   showBookmarksPanel: false,
   skipSilenceEnabled: false,
   eqPreset: "flat",
+  playbackError: null,
 
   setBook: (book, files, chapters, initialFileIndex, initialPosition, speed) => {
     const safeIndex = Math.max(0, Math.min(initialFileIndex, Math.max(0, files.length - 1)));
@@ -83,6 +91,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
       isPlaying: false,
       speed,
       currentChapterIndex: -1,
+      playbackError: null,
     });
   },
 
@@ -90,6 +99,10 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   setDuration: (seconds) => set({ duration: seconds }),
   setIsPlaying: (playing) => set({ isPlaying: playing }),
   setSpeed: (speed) => set({ speed }),
+  setVolume: (level) => {
+    const n = Number.isFinite(level) ? level : 100;
+    set({ volume: Math.min(100, Math.max(0, Math.round(n))) });
+  },
   setChapters: (chapters) => set({ chapters }),
   setBookmarks: (bookmarks) => set({ bookmarks }),
   setSleepTimer: (state) => set({ sleepTimer: state }),
@@ -100,6 +113,7 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   setSkipSilenceEnabled: (enabled) => set({ skipSilenceEnabled: enabled }),
   toggleSkipSilence: () => set((s) => ({ skipSilenceEnabled: !s.skipSilenceEnabled })),
   setEqPreset: (preset) => set({ eqPreset: preset }),
+  setPlaybackError: (message) => set({ playbackError: message }),
 
   nextFile: () => {
     const { currentFileIndex, files } = get();

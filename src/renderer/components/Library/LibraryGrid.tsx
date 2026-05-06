@@ -17,22 +17,80 @@ function EmptyLibrary({
       style={{
         flex: 1,
         minHeight: 360,
-        border: dragActive ? "2px dashed #4a8fd4" : "2px dashed #333",
+        border: dragActive ? "2px dashed var(--accent)" : "2px dashed var(--border-default)",
         borderRadius: 16,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: 16,
-        color: "#888",
+        gap: 20,
+        padding: "80px 40px",
+        textAlign: "center",
         cursor: "pointer",
-        background: dragActive ? "#121820" : "#121212",
+        background: dragActive ? "var(--accent-soft)" : "transparent",
+        transition: "all 150ms ease",
       }}
     >
-      <div style={{ fontSize: 48, opacity: 0.35 }}>📚</div>
-      <div style={{ fontSize: 16, color: "#bbb", textAlign: "center", maxWidth: 360, padding: "0 16px" }}>
-        Drop audiobooks here or click to browse
+      <svg width="80" height="80" viewBox="0 0 80 80" fill="none" aria-hidden="true">
+        <path
+          d="M16 44V36C16 22.7 26.7 12 40 12C53.3 12 64 22.7 64 36V44"
+          stroke="var(--text-muted)"
+          strokeWidth="3"
+          strokeLinecap="round"
+          fill="none"
+        />
+        <rect
+          x="10"
+          y="42"
+          width="14"
+          height="20"
+          rx="6"
+          fill="var(--bg-elevated)"
+          stroke="var(--border-strong)"
+          strokeWidth="1.5"
+        />
+        <rect
+          x="56"
+          y="42"
+          width="14"
+          height="20"
+          rx="6"
+          fill="var(--bg-elevated)"
+          stroke="var(--border-strong)"
+          strokeWidth="1.5"
+        />
+        <circle cx="17" cy="52" r="3" fill="var(--accent)" opacity={0.8} />
+        <circle cx="63" cy="52" r="3" fill="var(--accent)" opacity={0.8} />
+      </svg>
+
+      <div>
+        <p
+          style={{
+            fontSize: 18,
+            fontWeight: 600,
+            color: "var(--text-primary)",
+            marginBottom: 8,
+            letterSpacing: "-0.01em",
+          }}
+        >
+          Your library is empty
+        </p>
+        <p style={{ fontSize: 14, color: "var(--text-muted)", maxWidth: 280, lineHeight: 1.6 }}>
+          Drop audiobook files or folders here, or use the button above to browse your files
+        </p>
       </div>
+
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          void onBrowse();
+        }}
+        className="btn-primary"
+        style={{ marginTop: 4 }}
+      >
+        Add your first book
+      </button>
     </div>
   );
 }
@@ -67,7 +125,7 @@ export function LibraryGrid({
       <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
         {groups.map((g) => (
           <div key={g.label}>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, color: "#ccc", letterSpacing: 0.3 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 12, color: "var(--text-muted)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
               {g.label}
             </div>
             <div style={gridStyle}>

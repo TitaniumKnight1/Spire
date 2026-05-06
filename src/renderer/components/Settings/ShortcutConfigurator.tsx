@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
 import { IPC_CHANNELS } from "@shared/ipc-channels";
 import { DEFAULT_SHORTCUT_MAP, type ShortcutMap } from "@shared/library-types";
 import { useIPC } from "../../hooks/useIPC.js";
@@ -107,6 +107,10 @@ function eventToAccelerator(e: KeyboardEvent): "cancel" | "reject" | string {
   return [...parts, main].join("+");
 }
 
+function displayAccelerator(accel: string): string {
+  return accel.replaceAll("CommandOrControl", "Ctrl");
+}
+
 export function ShortcutConfigurator(): ReactElement {
   const { invoke } = useIPC();
   const [map, setMap] = useState<ShortcutMap | null>(null);
@@ -209,7 +213,7 @@ export function ShortcutConfigurator(): ReactElement {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {map == null ? (
-        <div style={{ color: "#888" }}>Loading shortcuts…</div>
+        <div style={{ color: "var(--text-muted)" }}>Loading shortcuts…</div>
       ) : (
         rows.map((row) => {
           const isRow = editing === row.id;
@@ -224,26 +228,27 @@ export function ShortcutConfigurator(): ReactElement {
                 alignItems: "center",
                 gap: 12,
                 flexWrap: "wrap",
-                padding: "10px 12px",
-                borderRadius: 8,
-                border: "1px solid #2a2a2a",
-                background: "#141414",
+                padding: "10px 0",
+                borderBottom: "1px solid var(--border-subtle)",
               }}
             >
-              <div style={{ flex: "1 1 160px", fontSize: 14, color: "#ddd" }}>{row.label}</div>
+              <div style={{ flex: "1 1 160px", fontSize: 13, color: "var(--text-secondary)" }}>{row.label}</div>
               <div
                 style={{
-                  minWidth: 140,
-                  padding: "6px 10px",
-                  borderRadius: 999,
-                  background: "#222",
-                  color: "#ccc",
-                  fontFamily: "ui-monospace, monospace",
-                  fontSize: 13,
+                  minWidth: 80,
+                  padding: "5px 12px",
+                  borderRadius: 6,
+                  background: "var(--bg-base)",
+                  border: "1px solid var(--border-strong)",
+                  color: showCapture ? "var(--text-muted)" : "var(--text-primary)",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 12,
+                  fontWeight: 500,
                   textAlign: "center",
+                  animation: showCapture ? "capturePulse 1s ease-in-out infinite" : "none",
                 }}
               >
-                {showCapture ? "Press a key…" : showConfirm ? pending : accel}
+                {showCapture ? "Press a key…" : showConfirm ? displayAccelerator(pending) : displayAccelerator(accel)}
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 {!isRow || phase == null ? (
@@ -251,49 +256,38 @@ export function ShortcutConfigurator(): ReactElement {
                     type="button"
                     disabled={busy}
                     onClick={() => startEdit(row.id)}
-                    style={btnStyle(false)}
+                    className="btn-secondary"
+                    style={{ padding: "5px 12px", marginLeft: 12 }}
                   >
                     Edit
                   </button>
                 ) : showConfirm ? (
                   <>
-                    <button type="button" disabled={busy} onClick={() => void savePending()} style={btnStyle(false)}>
+                    <button type="button" disabled={busy} onClick={() => void savePending()} className="btn-secondary" style={{ padding: "5px 12px", marginLeft: 12 }}>
                       Save
                     </button>
-                    <button type="button" disabled={busy} onClick={cancelEdit} style={btnStyle(true)}>
+                    <button type="button" disabled={busy} onClick={cancelEdit} className="btn-secondary" style={{ padding: "5px 12px" }}>
                       Cancel
                     </button>
                   </>
                 ) : (
-                  <button type="button" disabled={busy} onClick={cancelEdit} style={btnStyle(true)}>
+                  <button type="button" disabled={busy} onClick={cancelEdit} className="btn-secondary" style={{ padding: "5px 12px" }}>
                     Cancel
                   </button>
                 )}
               </div>
               {isRow && error ? (
-                <div style={{ flexBasis: "100%", color: "#e07070", fontSize: 12 }}>{error}</div>
+                <div style={{ flexBasis: "100%", color: "var(--color-error)", fontSize: 12 }}>{error}</div>
               ) : null}
             </div>
           );
         })
       )}
       <div style={{ marginTop: 8 }}>
-        <button type="button" disabled={busy || map == null} onClick={() => void resetDefaults()} style={btnStyle(false)}>
+        <button type="button" disabled={busy || map == null} onClick={() => void resetDefaults()} className="btn-secondary" style={{ marginTop: 20 }}>
           Reset to defaults
         </button>
       </div>
     </div>
   );
-}
-
-function btnStyle(danger: boolean): CSSProperties {
-  return {
-    padding: "6px 12px",
-    borderRadius: 8,
-    border: danger ? "1px solid #522" : "1px solid #333",
-    background: danger ? "#301818" : "#1e1e1e",
-    color: danger ? "#faa" : "#e8e8e8",
-    cursor: "pointer",
-    fontSize: 13,
-  };
 }

@@ -117,27 +117,10 @@ export function FeedList(props: FeedListProps): ReactElement {
           onChange={(e) => setFeedUrlInput(e.target.value)}
           placeholder="Paste RSS / Atom feed URL…"
           disabled={busy}
-          style={{
-            flex: "1 1 280px",
-            padding: "10px 12px",
-            borderRadius: 8,
-            border: "1px solid #333",
-            background: "#0f0f0f",
-            color: "#e8e8e8",
-          }}
+          className="input-base"
+          style={{ flex: "1 1 280px" }}
         />
-        <button
-          type="submit"
-          disabled={busy}
-          style={{
-            padding: "10px 18px",
-            borderRadius: 8,
-            border: "1px solid #444",
-            background: "#1c1c1c",
-            color: "#e8e8e8",
-            cursor: busy ? "wait" : "pointer",
-          }}
-        >
+        <button type="submit" disabled={busy} className="btn-primary" style={{ cursor: busy ? "wait" : "pointer" }}>
           Preview
         </button>
       </form>
@@ -145,33 +128,26 @@ export function FeedList(props: FeedListProps): ReactElement {
       {preview && previewUrl ? (
         <div
           style={{
-            border: "1px solid #2a2a2a",
-            borderRadius: 10,
-            padding: 14,
+            border: "1px solid var(--border-subtle)",
+            borderRadius: "var(--radius-lg)",
+            padding: 20,
             marginBottom: 20,
-            background: "#141414",
+            background: "var(--bg-surface)",
           }}
         >
           <div style={{ fontWeight: 600 }}>{preview.title}</div>
           {preview.description ? (
-            <div style={{ fontSize: 14, color: "#9a9a9a", marginTop: 6 }}>{preview.description.slice(0, 280)}</div>
+            <div style={{ fontSize: 14, color: "var(--text-secondary)", marginTop: 6 }}>{preview.description.slice(0, 280)}</div>
           ) : null}
-          <div style={{ fontSize: 13, color: "#7a7a7a", marginTop: 8 }}>
+          <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8 }}>
             {preview.episodes.length} episode{preview.episodes.length === 1 ? "" : "s"} detected
           </div>
           <button
             type="button"
             disabled={busy}
             onClick={() => void onConfirmSave()}
-            style={{
-              marginTop: 12,
-              padding: "8px 16px",
-              borderRadius: 8,
-              border: "1px solid #3584e4",
-              background: "#1a2840",
-              color: "#e8e8e8",
-              cursor: busy ? "wait" : "pointer",
-            }}
+            className="btn-primary"
+            style={{ marginTop: 12, cursor: busy ? "wait" : "pointer" }}
           >
             Save to Podcasts
           </button>
@@ -179,13 +155,15 @@ export function FeedList(props: FeedListProps): ReactElement {
       ) : null}
 
       {error ? (
-        <p style={{ color: "#f66", marginTop: 0 }}>{error}</p>
+        <p style={{ color: "var(--color-error)", marginTop: 0 }}>{error}</p>
       ) : null}
 
-      {loading ? <p style={{ color: "#9a9a9a" }}>Loading feeds…</p> : null}
+      {loading ? <p style={{ color: "var(--text-muted)" }}>Loading feeds…</p> : null}
 
       {!loading && feeds.length === 0 ? (
-        <p style={{ color: "#9a9a9a" }}>No saved feeds yet. Preview a feed URL above to add one.</p>
+        <p style={{ color: "var(--text-muted)", paddingTop: 32, textAlign: "center" }}>
+          No saved feeds yet. Preview a feed URL above to add one.
+        </p>
       ) : null}
 
       <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -197,17 +175,17 @@ export function FeedList(props: FeedListProps): ReactElement {
               alignItems: "center",
               gap: 12,
               padding: "12px 14px",
-              borderRadius: 10,
-              border: "1px solid #2a2a2a",
-              background: "#111",
+              borderRadius: "var(--radius-md)",
+              border: "1px solid var(--border-subtle)",
+              background: "var(--bg-elevated)",
             }}
           >
             <div
               style={{
                 width: 52,
                 height: 52,
-                borderRadius: 8,
-                background: "#222",
+                borderRadius: "var(--radius-md)",
+                background: "var(--bg-surface)",
                 flexShrink: 0,
                 overflow: "hidden",
               }}
@@ -228,7 +206,7 @@ export function FeedList(props: FeedListProps): ReactElement {
                 textAlign: "left",
                 background: "transparent",
                 border: "none",
-                color: "#e8e8e8",
+                color: "var(--text-primary)",
                 cursor: "pointer",
                 padding: 0,
                 fontWeight: 600,
@@ -240,15 +218,8 @@ export function FeedList(props: FeedListProps): ReactElement {
             <button
               type="button"
               onClick={() => void onDelete(f.id)}
-              style={{
-                padding: "6px 12px",
-                borderRadius: 6,
-                border: "1px solid #633",
-                background: "#221010",
-                color: "#faa",
-                cursor: "pointer",
-                fontSize: 13,
-              }}
+              className="btn-danger"
+              style={{ padding: "5px 12px" }}
             >
               Delete
             </button>

@@ -1,4 +1,3 @@
-import type { Howl } from "howler";
 import type { EqBand, EqPreset } from "@shared/library-types";
 
 export type Html5AudioGraph = {
@@ -19,6 +18,22 @@ const EQ_STAGES: Record<Exclude<EqPreset, "flat">, EqBand[]> = {
     { type: "peaking", frequency: 500, gain: -2, Q: 1.0 },
   ],
 };
+
+let sharedAudioContext: AudioContext | null = null;
+
+/**
+ * Single shared `AudioContext` for the renderer (EQ, skip-silence analyser, routing).
+ * Not tied to any third-party player library.
+ */
+export function acquireAudioContext(): AudioContext {
+  if (!sharedAudioContext) {
+    sharedAudioContext = new AudioContext();
+  }
+  return sharedAudioContext;
+}
+
+/** `createMediaElementSource` is only valid once per element; reuse the graph shell across tracks. */
+const graphByAudioElement = new WeakMap<HTMLAudioElement, Html5AudioGraph>();
 
 function applyEqBand(f: BiquadFilterNode, band: EqBand): void {
   f.frequency.value = band.frequency;
@@ -79,34 +94,24 @@ export function teardownHtml5AudioGraph(graph: Html5AudioGraph | null): void {
   }
 }
 
-function acquireSharedAudioContext(): AudioContext {
-  const g = globalThis as unknown as { Howler?: { ctx: AudioContext | null } };
-  if (g.Howler?.ctx) {
-    return g.Howler.ctx;
+/**
+ * Wire `audioEl` through EQ + analyser into `audioContext.destination`.
+ * Reuses one `MediaElementAudioSourceNode` per element (Web Audio API restriction).
+ */
+export function setupHtml5AudioGraph(
+  audioEl: HTMLAudioElement,
+  audioContext: AudioContext,
+  preset: EqPreset,
+): Html5AudioGraph {
+  let graph = graphByAudioElement.get(audioEl);
+  if (!graph) {
+    const source = audioContext.createMediaElementSource(audioEl);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.35;
+    graph = { ctx: audioContext, source, filters: [], analyser };
+    graphByAudioElement.set(audioEl, graph);
   }
-  const ctx = new AudioContext();
-  if (g.Howler) {
-    g.Howler.ctx = ctx;
-  }
-  return ctx;
-}
-
-export function setupHtml5AudioGraph(howl: Howl, preset: EqPreset): Html5AudioGraph | null {
-  const internals = howl as unknown as { _sounds?: Array<{ _node?: unknown }> };
-  const sound = internals._sounds?.[0];
-  const audioEl = sound?._node as HTMLAudioElement | undefined;
-  if (!audioEl) {
-    return null;
-  }
-
-  const ctx = acquireSharedAudioContext();
-
-  const source = ctx.createMediaElementSource(audioEl);
-  const analyser = ctx.createAnalyser();
-  analyser.fftSize = 2048;
-  analyser.smoothingTimeConstant = 0.35;
-
-  const graph: Html5AudioGraph = { ctx, source, filters: [], analyser };
   rebuildHtml5EqChain(graph, preset);
   return graph;
 }

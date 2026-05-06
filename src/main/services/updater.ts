@@ -1,10 +1,6 @@
 import { app, type BrowserWindow } from "electron";
-import { autoUpdater } from "electron-updater";
+import type { AppUpdater } from "electron-updater";
 import { IPC_CHANNELS } from "../../shared/ipc-channels.js";
-
-autoUpdater.logger = null;
-autoUpdater.autoDownload = true;
-autoUpdater.autoInstallOnAppQuit = true;
 
 let listenersAttached = false;
 let mainWindowRef: BrowserWindow | null = null;
@@ -16,7 +12,7 @@ function getMainWindow(): BrowserWindow | null {
   return null;
 }
 
-function attachAutoUpdaterListeners(): void {
+function attachAutoUpdaterListeners(autoUpdater: AppUpdater): void {
   if (listenersAttached) {
     return;
   }
@@ -48,8 +44,15 @@ export function checkForUpdates(mainWindow: BrowserWindow): void {
     return;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { autoUpdater } = require("electron-updater") as { autoUpdater: AppUpdater };
+
+  autoUpdater.logger = null;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
   mainWindowRef = mainWindow;
-  attachAutoUpdaterListeners();
+  attachAutoUpdaterListeners(autoUpdater);
 
   void autoUpdater.checkForUpdates().catch((err) => {
     console.error("[spire] Update check failed:", err);

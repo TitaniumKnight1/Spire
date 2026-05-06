@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { IPC_CHANNELS } from "@shared/ipc-channels";
 import type {
   BookListItem,
@@ -36,7 +36,7 @@ export function useLibrary(): {
   setWatchFolder: () => Promise<string | null>;
   clearWatchFolder: () => Promise<null>;
 } {
-  const invoke = useIPC().invoke;
+  const { invoke, subscribe } = useIPC();
   const books = useLibraryStore((s) => s.books);
   const isLoading = useLibraryStore((s) => s.isLoading);
   const viewMode = useLibraryStore((s) => s.viewMode);
@@ -139,6 +139,13 @@ export function useLibrary(): {
   const clearWatchFolder = useCallback(async () => {
     return invoke<null>(IPC_CHANNELS.library.CLEAR_WATCH_FOLDER);
   }, [invoke]);
+
+  useEffect(() => {
+    const unsub = subscribe(IPC_CHANNELS.library.UPDATED, () => {
+      void refreshLibrary();
+    });
+    return unsub;
+  }, [subscribe, refreshLibrary]);
 
   return {
     books,

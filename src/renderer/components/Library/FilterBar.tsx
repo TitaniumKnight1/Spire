@@ -1,19 +1,13 @@
-import { type ReactElement, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type ReactElement, useEffect, useMemo, useState } from "react";
 import type { BookListItem } from "@shared/library-types";
 import { useLibraryStore } from "../../store/libraryStore.js";
 
-const btnStyle = {
-  padding: "6px 10px",
-  borderRadius: 8,
-  border: "1px solid #333",
-  background: "#1e1e1e",
-  color: "#e8e8e8",
-  cursor: "pointer" as const,
-  fontSize: 13,
-};
+const controlH: CSSProperties = { height: 34, boxSizing: "border-box" };
 
 export function FilterBar({ books }: { books: BookListItem[] }): ReactElement {
   const filters = useLibraryStore((s) => s.filters);
+  const viewMode = useLibraryStore((s) => s.viewMode);
+  const setViewMode = useLibraryStore((s) => s.setViewMode);
   const setFilters = useLibraryStore((s) => s.setFilters);
   const resetFilters = useLibraryStore((s) => s.resetFilters);
 
@@ -52,38 +46,34 @@ export function FilterBar({ books }: { books: BookListItem[] }): ReactElement {
   }, [books]);
 
   const seriesFilterDisabled = filters.groupBySeries;
+  const hasActiveFilters =
+    filters.query.trim().length > 0 ||
+    filters.status !== "all" ||
+    filters.tag != null ||
+    filters.series != null ||
+    filters.groupBySeries;
 
   return (
     <div
       style={{
-        display: "flex",
-        flexWrap: "wrap",
-        gap: 10,
-        alignItems: "center",
-        padding: "12px 14px",
-        borderRadius: 12,
-        border: "1px solid #2a2a2a",
-        background: "#141414",
+        marginBottom: 20,
+        background: "var(--bg-surface)",
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 10,
+        padding: "10px 14px",
       }}
     >
-      <input
-        type="search"
-        placeholder="Search title, author, narrator…"
-        value={localQuery}
-        onChange={(e) => setLocalQuery(e.target.value)}
-        style={{
-          minWidth: 200,
-          flex: "1 1 200px",
-          padding: "8px 10px",
-          borderRadius: 8,
-          border: "1px solid #333",
-          background: "#0f0f0f",
-          color: "#e8e8e8",
-        }}
-      />
-
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#aaa" }}>
-        Status
+      <div className="filter-toolbar-inner">
+        <input
+          type="search"
+          placeholder="Search title, author, narrator…"
+          value={localQuery}
+          onChange={(e) => setLocalQuery(e.target.value)}
+          className="filter-search-inside"
+          style={{ ...controlH, paddingLeft: 4, paddingRight: 8 }}
+          aria-label="Search library"
+        />
+        <div className="toolbar-divider" role="separator" aria-hidden="true" />
         <select
           value={filters.status}
           onChange={(e) =>
@@ -91,75 +81,125 @@ export function FilterBar({ books }: { books: BookListItem[] }): ReactElement {
               status: e.target.value as (typeof filters)["status"],
             })
           }
-          style={{ padding: "6px 8px", borderRadius: 8, border: "1px solid #333", background: "#1a1a1a", color: "#e8e8e8" }}
+          className="select-base"
+          style={{ ...controlH, minWidth: 130 }}
+          aria-label="Status filter"
         >
-          <option value="all">All</option>
-          <option value="unstarted">Unstarted</option>
-          <option value="in-progress">In Progress</option>
-          <option value="finished">Finished</option>
+          <option value="all">Status: All</option>
+          <option value="unstarted">Status: Unstarted</option>
+          <option value="in-progress">Status: In Progress</option>
+          <option value="finished">Status: Finished</option>
         </select>
-      </label>
-
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#aaa" }}>
-        Tag
         <select
           value={filters.tag ?? ""}
           onChange={(e) => setFilters({ tag: e.target.value === "" ? null : e.target.value })}
-          style={{ padding: "6px 8px", borderRadius: 8, border: "1px solid #333", background: "#1a1a1a", color: "#e8e8e8", minWidth: 120 }}
+          className="select-base"
+          style={{ ...controlH, minWidth: 130 }}
+          aria-label="Tag filter"
         >
-          <option value="">All tags</option>
+          <option value="">Tag: All</option>
           {tagOptions.map((t) => (
             <option key={t} value={t}>
               {t}
             </option>
           ))}
         </select>
-      </label>
-
-      <label
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          fontSize: 13,
-          color: seriesFilterDisabled ? "#555" : "#aaa",
-        }}
-      >
-        Series
         <select
           disabled={seriesFilterDisabled}
           value={filters.series ?? ""}
           onChange={(e) => setFilters({ series: e.target.value === "" ? null : e.target.value })}
+          className="select-base"
           style={{
-            padding: "6px 8px",
-            borderRadius: 8,
-            border: "1px solid #333",
-            background: seriesFilterDisabled ? "#111" : "#1a1a1a",
-            color: seriesFilterDisabled ? "#666" : "#e8e8e8",
-            minWidth: 120,
+            ...controlH,
+            minWidth: 130,
+            opacity: seriesFilterDisabled ? 0.6 : 1,
+            cursor: seriesFilterDisabled ? "not-allowed" : "pointer",
           }}
+          aria-label="Series filter"
         >
-          <option value="">All series</option>
+          <option value="">Series: All</option>
           {seriesOptions.map((s) => (
             <option key={s} value={s}>
               {s}
             </option>
           ))}
         </select>
-      </label>
-
-      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#aaa", cursor: "pointer" }}>
-        <input
-          type="checkbox"
-          checked={filters.groupBySeries}
-          onChange={(e) => setFilters({ groupBySeries: e.target.checked })}
-        />
-        Group by series
-      </label>
-
-      <button type="button" onClick={() => resetFilters()} style={btnStyle}>
-        Clear filters
-      </button>
+        <div className="toolbar-divider" role="separator" aria-hidden="true" />
+        <button
+          type="button"
+          onClick={() => setFilters({ groupBySeries: !filters.groupBySeries })}
+          className="btn-secondary"
+          style={{
+            ...controlH,
+            borderRadius: 20,
+            padding: "0 14px",
+            display: "inline-flex",
+            alignItems: "center",
+            background: filters.groupBySeries ? "var(--accent-soft)" : "transparent",
+            color: filters.groupBySeries ? "var(--accent)" : "var(--text-secondary)",
+            borderColor: filters.groupBySeries ? "var(--accent)" : "var(--border-default)",
+          }}
+        >
+          Group by series
+        </button>
+        {hasActiveFilters ? (
+          <button
+            type="button"
+            onClick={() => resetFilters()}
+            className="btn-secondary"
+            style={{ ...controlH, padding: "0 14px", display: "inline-flex", alignItems: "center" }}
+          >
+            Clear filters
+          </button>
+        ) : null}
+        <div className="toolbar-divider" role="separator" aria-hidden="true" />
+        <div
+          style={{
+            marginLeft: "auto",
+            display: "inline-flex",
+            border: "1px solid var(--border-default)",
+            borderRadius: "var(--radius-md)",
+            overflow: "hidden",
+            height: 34,
+          }}
+        >
+          <button
+            type="button"
+            aria-label="Grid view"
+            onClick={() => setViewMode("grid")}
+            style={{
+              width: 34,
+              height: 34,
+              border: "none",
+              borderRight: "1px solid var(--border-default)",
+              background: viewMode === "grid" ? "var(--bg-hover)" : "transparent",
+              color: viewMode === "grid" ? "var(--text-primary)" : "var(--text-muted)",
+              cursor: "pointer",
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <path d="M1 1h5v5H1zM8 1h5v5H8zM1 8h5v5H1zM8 8h5v5H8z" fill="currentColor" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            aria-label="List view"
+            onClick={() => setViewMode("list")}
+            style={{
+              width: 34,
+              height: 34,
+              border: "none",
+              background: viewMode === "list" ? "var(--bg-hover)" : "transparent",
+              color: viewMode === "list" ? "var(--text-primary)" : "var(--text-muted)",
+              cursor: "pointer",
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <path d="M1 2h12v2H1zM1 6h12v2H1zM1 10h12v2H1z" fill="currentColor" />
+            </svg>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

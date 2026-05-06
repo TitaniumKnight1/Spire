@@ -1,6 +1,13 @@
+import fs from "node:fs";
+import path from "node:path";
 import { BrowserWindow, ipcMain } from "electron";
 import { IPC_CHANNELS } from "../../shared/ipc-channels.js";
-import type { DownloadItem, RssFeedPayload, SavedPodcastFeed } from "../../shared/library-types.js";
+import type {
+  DownloadItem,
+  DownloadProgressPush,
+  RssFeedPayload,
+  SavedPodcastFeed,
+} from "../../shared/library-types.js";
 import {
   deletePodcastFeed,
   getAllDownloads,
@@ -8,6 +15,7 @@ import {
   insertDownload,
   resetDownloadForRetry,
   updateDownloadCompletedAt,
+  updateDownloadError,
   updateDownloadStatus,
   type DownloadRow,
 } from "../services/database.js";
@@ -17,11 +25,8 @@ import {
   getFeeds as rssGetFeeds,
   saveFeedFromPayload,
 } from "../services/rss.js";
-import { getTorrentManager } from "../services/torrent.js";
-import type { DownloadProgressPush } from "../services/torrent.js";
+import { getStagingDirectoryRoot } from "../utils/paths.js";
 
-const pendingMagnets: string[] = [];
-const pendingTorrentPaths: string[] = [];
 let downloadsBrowserWindow: BrowserWindow | null = null;
 
 function sendDownloadProgressPush(payload: DownloadProgressPush): void {
@@ -29,6 +34,10 @@ function sendDownloadProgressPush(payload: DownloadProgressPush): void {
   if (win && !win.isDestroyed()) {
     win.webContents.send(IPC_CHANNELS.downloads.PROGRESS_UPDATE, payload);
   }
+}
+
+function stagingDirForDownload(downloadId: number): string {
+  return path.join(getStagingDirectoryRoot(), String(downloadId));
 }
 
 function rowToDownloadItem(row: DownloadRow): DownloadItem {
@@ -52,70 +61,12 @@ function rowToDownloadItem(row: DownloadRow): DownloadItem {
     started_at: row.started_at,
     completed_at: row.completed_at,
     display_name: row.display_name,
+    displayName: row.display_name,
+    source_url: row.source_url,
     speed_bps: 0,
     eta_seconds: null,
     error_message: row.error_message ?? null,
   };
-}
-
-export function queueMagnetForStartup(uri: string): void {
-  pendingMagnets.push(uri);
-}
-
-export function queueTorrentFileForStartup(filePath: string): void {
-  pendingTorrentPaths.push(filePath);
-}
-
-export async function enqueueMagnetDownload(uri: string): Promise<number | null> {
-  const trimmed = uri.trim();
-  if (!trimmed.startsWith("magnet:")) {
-    return null;
-  }
-  const id = insertDownload({
-    source_url: trimmed,
-    source_type: "magnet",
-    status: "queued",
-  });
-  await getTorrentManager().addMagnet(trimmed, id);
-  return id;
-}
-
-export async function enqueueTorrentFilePath(filePath: string): Promise<number | null> {
-  if (!filePath.toLowerCase().endsWith(".torrent")) {
-    return null;
-  }
-  const id = insertDownload({
-    source_url: filePath,
-    source_type: "torrent_file",
-    status: "queued",
-  });
-  await getTorrentManager().addTorrentFile(filePath, id);
-  return id;
-}
-
-export async function flushPendingDownloadQueues(): Promise<void> {
-  for (const m of pendingMagnets) {
-    try {
-      await enqueueMagnetDownload(m);
-    } catch (e) {
-      console.error("[spire] pending magnet failed:", e);
-    }
-  }
-  pendingMagnets.length = 0;
-  for (const p of pendingTorrentPaths) {
-    try {
-      await enqueueTorrentFilePath(p);
-    } catch (e) {
-      console.error("[spire] pending .torrent failed:", e);
-    }
-  }
-  pendingTorrentPaths.length = 0;
-}
-
-export function setDownloadsBrowserWindow(win: BrowserWindow | null): void {
-  downloadsBrowserWindow = win;
-  getTorrentManager().setMainWindow(win);
-  getUrlDownloader().setMainWindow(win);
 }
 
 function isTorrentSource(row: DownloadRow | undefined): boolean {
@@ -123,25 +74,15 @@ function isTorrentSource(row: DownloadRow | undefined): boolean {
   return st === "magnet" || st === "torrent_file";
 }
 
+const TORRENT_UNSUPPORTED =
+  "Torrent downloads are not supported in this version. Use qBittorrent or another client, then point your download folder at your Spire library.";
+
+export function setDownloadsBrowserWindow(win: BrowserWindow | null): void {
+  downloadsBrowserWindow = win;
+  getUrlDownloader().setMainWindow(win);
+}
+
 export function registerDownloadsIpc(): void {
-  ipcMain.handle(IPC_CHANNELS.downloads.ADD_MAGNET, async (_event, magnetUri: unknown) => {
-    const uri = typeof magnetUri === "string" ? magnetUri : "";
-    const id = await enqueueMagnetDownload(uri);
-    if (id == null) {
-      throw new Error("Invalid magnet URI");
-    }
-    return { downloadId: id };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.downloads.ADD_TORRENT_FILE, async (_event, filePath: unknown) => {
-    const fp = typeof filePath === "string" ? filePath : "";
-    const id = await enqueueTorrentFilePath(fp);
-    if (id == null) {
-      throw new Error("Invalid .torrent path");
-    }
-    return { downloadId: id };
-  });
-
   ipcMain.handle(IPC_CHANNELS.downloads.ADD_URL, async (_event, rawUrl: unknown) => {
     const trimmed = typeof rawUrl === "string" ? rawUrl.trim() : "";
     if (!trimmed) {
@@ -178,7 +119,7 @@ export function registerDownloadsIpc(): void {
     }
     const row = getDownloadById(id);
     if (isTorrentSource(row)) {
-      getTorrentManager().pause(id);
+      return;
     }
   });
 
@@ -189,7 +130,7 @@ export function registerDownloadsIpc(): void {
     }
     const row = getDownloadById(id);
     if (isTorrentSource(row)) {
-      await getTorrentManager().resume(id);
+      return;
     }
   });
 
@@ -200,7 +141,22 @@ export function registerDownloadsIpc(): void {
     }
     const row = getDownloadById(id);
     if (isTorrentSource(row)) {
-      await getTorrentManager().cancel(id);
+      const dir = stagingDirForDownload(id);
+      if (fs.existsSync(dir)) {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+      updateDownloadStatus(id, "cancelled");
+      updateDownloadCompletedAt(id, new Date().toISOString());
+      const next = getDownloadById(id);
+      sendDownloadProgressPush({
+        id,
+        name: next?.display_name ?? "Cancelled",
+        torrentName: null,
+        progress_pct: next?.progress_pct ?? 0,
+        speed: 0,
+        status: "cancelled",
+        eta: null,
+      });
       return;
     }
     getUrlDownloader().cancelDownload(id);
@@ -227,7 +183,17 @@ export function registerDownloadsIpc(): void {
       return;
     }
     if (isTorrentSource(row)) {
-      await getTorrentManager().retry(id);
+      updateDownloadError(id, TORRENT_UNSUPPORTED);
+      const refreshed = getDownloadById(id);
+      sendDownloadProgressPush({
+        id,
+        name: refreshed?.display_name?.trim() || refreshed?.source_url || "Download",
+        torrentName: null,
+        progress_pct: refreshed?.progress_pct ?? 0,
+        speed: 0,
+        status: "failed",
+        eta: null,
+      });
       return;
     }
     resetDownloadForRetry(id);
@@ -284,10 +250,7 @@ export function registerDownloadsIpc(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.rss.DOWNLOAD_EPISODE,
-    async (
-      _event,
-      body: unknown,
-    ): Promise<{ downloadId: number }> => {
+    async (_event, body: unknown): Promise<{ downloadId: number }> => {
       const o = body as { url?: string; title?: string | null };
       const episodeUrl = typeof o?.url === "string" ? o.url.trim() : "";
       if (!episodeUrl) {

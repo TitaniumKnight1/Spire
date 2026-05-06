@@ -2,8 +2,8 @@
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2022"],
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,
@@ -15,5 +15,6 @@
     "sourceMap": true,
     "declaration": false
   },
-  "include": ["src/main/**/*.ts", "src/shared/**/*.ts", "src/types/**/*.d.ts"]
+  "include": ["src/main/**/*.ts", "src/shared/**/*.ts", "src/types/**/*.d.ts"],
+  "exclude": ["src/main/preload.ts"]
 }

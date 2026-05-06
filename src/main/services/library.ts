@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { net } from "electron";
 import { SUPPORTED_AUDIO_EXTENSIONS } from "../utils/formats.js";
 import { getCoversDirectory } from "../utils/paths.js";
@@ -20,7 +21,8 @@ import {
   upsertProgress,
 } from "./database.js";
 import { SETTINGS_KEY_DEFAULT_SPEED } from "../ipc/settings.js";
-import { coverFileUrl, parseAudioFile, persistCoverArt, type ParsedAudioMetadata } from "./metadata.js";
+import { coverHttpUrl, getAudioServerPort } from "./audio-server.js";
+import { parseAudioFile, persistCoverArt, type ParsedAudioMetadata } from "./metadata.js";
 import type { BookDetailPayload, BookListItem } from "../../shared/library-types.js";
 
 const AUDIO_EXT_SET = new Set<string>(SUPPORTED_AUDIO_EXTENSIONS);
@@ -278,20 +280,29 @@ async function appendFilesToBook(bookId: number, sorted: ParsedFile[]): Promise<
   if (!book) {
     return;
   }
+
+  const allRows = getFilesByBook(bookId);
+  const allPaths = allRows.map((r) => r.file_path);
+  const parseErrors: string[] = [];
+  const parsedAll = await parsePathsWithErrors(allPaths, parseErrors);
+  const agg =
+    parsedAll.length > 0
+      ? aggregateBookFields(sortParsedFiles(parsedAll))
+      : aggregateBookFields(sorted);
+
   let coverPath = book.cover_art_path;
   if (!coverPath) {
-    const agg = aggregateBookFields(sorted);
     coverPath = persistCoverArt(bookId, agg.coverSource);
   }
   upsertBook({
     id: bookId,
     title: book.title,
-    author: book.author,
-    narrator: book.narrator,
-    series: book.series,
-    series_order: book.series_order,
+    author: agg.author,
+    narrator: agg.narrator,
+    series: agg.series,
+    series_order: agg.series_order,
     cover_art_path: coverPath ?? book.cover_art_path,
-    description: book.description,
+    description: agg.description ?? book.description,
     status: book.status,
     total_duration: sum > 0 ? sum : null,
   });
@@ -326,7 +337,7 @@ function rowToListItem(
     narrator: row.narrator,
     series: row.series,
     series_order: row.series_order,
-    cover_art_url: coverFileUrl(row.cover_art_path),
+    cover_art_url: coverHttpUrl(row.cover_art_path),
     description: row.description,
     status: row.status,
     date_added: row.date_added,
@@ -398,6 +409,92 @@ export function getBookListItemById(bookId: number): BookListItem | null {
   return null;
 }
 
+function filePathKey(fp: string): string {
+  return path.normalize(path.resolve(fp));
+}
+
+/**
+ * Re-read ID3/metadata from all files on disk for this book and update `books` + per-file durations.
+ * Used after torrent ingest (paths exist but tags were never aggregated) and for on-demand repair.
+ */
+export async function reingestBookMetadata(bookId: number): Promise<void> {
+  const book = getBookById(bookId);
+  if (!book) {
+    return;
+  }
+  const rows = getFilesByBook(bookId);
+  if (rows.length === 0) {
+    return;
+  }
+  const errors: string[] = [];
+  const parsed = await parsePathsWithErrors(
+    rows.map((r) => r.file_path),
+    errors,
+  );
+  if (errors.length > 0) {
+    console.warn("[spire/library] reingestBookMetadata parse errors:", errors);
+  }
+  if (parsed.length === 0) {
+    return;
+  }
+  const sorted = sortParsedFiles(parsed);
+  const metaByKey = new Map(sorted.map((p) => [filePathKey(p.filePath), p.meta]));
+
+  for (const row of rows) {
+    const meta = metaByKey.get(filePathKey(row.file_path));
+    if (!meta) {
+      continue;
+    }
+    upsertFile({
+      id: row.id,
+      book_id: bookId,
+      file_path: row.file_path,
+      track_order: row.track_order,
+      duration: meta.durationSeconds,
+    });
+  }
+
+  let sum = 0;
+  for (const f of getFilesByBook(bookId)) {
+    sum += f.duration ?? 0;
+  }
+
+  const refreshed = getBookById(bookId);
+  if (!refreshed) {
+    return;
+  }
+  const agg = aggregateBookFields(sorted);
+  let coverPath = refreshed.cover_art_path;
+  if (!coverPath && agg.coverSource) {
+    coverPath = persistCoverArt(bookId, agg.coverSource);
+  }
+  upsertBook({
+    id: bookId,
+    title: refreshed.title,
+    author: agg.author,
+    narrator: agg.narrator,
+    series: agg.series,
+    series_order: agg.series_order,
+    cover_art_path: coverPath ?? refreshed.cover_art_path,
+    description: agg.description ?? refreshed.description,
+    status: refreshed.status,
+    total_duration: sum > 0 ? sum : refreshed.total_duration,
+  });
+}
+
+function resolveFilePlaybackFields(filePath: string): { playback_url: string | null; file_error: string | null } {
+  const resolved = path.resolve(filePath);
+  if (!fs.existsSync(resolved)) {
+    return { playback_url: null, file_error: `Audio file not found: ${resolved}` };
+  }
+  try {
+    return { playback_url: pathToFileURL(resolved).href, file_error: null };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { playback_url: null, file_error: `Could not build file URL: ${msg}` };
+  }
+}
+
 export function getBookDetail(bookId: number): BookDetailPayload | null {
   const book = getBookById(bookId);
   if (!book) {
@@ -419,7 +516,7 @@ export function getBookDetail(bookId: number): BookDetailPayload | null {
       narrator: book.narrator,
       series: book.series,
       series_order: book.series_order,
-      cover_art_url: coverFileUrl(book.cover_art_path),
+      cover_art_url: coverHttpUrl(book.cover_art_path),
       cover_art_path: book.cover_art_path,
       description: book.description,
       status: book.status,
@@ -427,12 +524,23 @@ export function getBookDetail(bookId: number): BookDetailPayload | null {
       date_added: book.date_added,
       total_duration: book.total_duration,
     },
-    files: files.map((f) => ({
-      id: f.id,
-      file_path: f.file_path,
-      track_order: f.track_order,
-      duration: f.duration,
-    })),
+    files: files.map((f) => {
+      const { playback_url: filePlaybackHref, file_error } = resolveFilePlaybackFields(f.file_path);
+      const resolved = path.resolve(f.file_path);
+      const port = getAudioServerPort();
+      const playback_url =
+        filePlaybackHref === null
+          ? null
+          : `http://127.0.0.1:${port}/audio?path=${encodeURIComponent(resolved)}`;
+      return {
+        id: f.id,
+        file_path: f.file_path,
+        track_order: f.track_order,
+        duration: f.duration,
+        playback_url,
+        file_error,
+      };
+    }),
     chapters: chapters.map((c) => ({
       id: c.id,
       file_id: c.file_id,
@@ -512,18 +620,22 @@ export function copyUserCoverToLibrary(
   return dest;
 }
 
+function coverSearchTitle(raw: string): string {
+  return raw.replace(/\s*[-–]\s*(ch|chapter|part|vol|volume)\s*\d+.*/i, "").trim();
+}
+
 export async function fetchCoverArt(bookId: number): Promise<string | null> {
   const book = getBookById(bookId);
   if (!book) {
     return null;
   }
-  const title = book.title;
+  const queryTitle = coverSearchTitle(book.title);
   const author = book.author ?? "";
 
   let imageData: Buffer | null = null;
 
   try {
-    const searchUrl = `https://openlibrary.org/search.json?title=${encodeURIComponent(title)}&author=${encodeURIComponent(author)}&fields=cover_i&limit=1`;
+    const searchUrl = `https://openlibrary.org/search.json?title=${encodeURIComponent(queryTitle)}&author=${encodeURIComponent(author)}&fields=cover_i&limit=1`;
     const searchBuf = await fetchHttpBuffer(searchUrl);
     if (searchBuf?.length) {
       try {
@@ -546,7 +658,7 @@ export async function fetchCoverArt(bookId: number): Promise<string | null> {
 
   if (!imageData?.length) {
     try {
-      const q = `intitle:${title}+inauthor:${author}`;
+      const q = `intitle:${queryTitle}+inauthor:${author}`;
       const volUrl = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=1`;
       const volBuf = await fetchHttpBuffer(volUrl);
       if (volBuf?.length) {

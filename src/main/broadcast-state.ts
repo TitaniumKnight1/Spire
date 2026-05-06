@@ -28,3 +28,20 @@ export function broadcastPlayerState(payload: PlayerStatePushPayload): void {
   }
   trayTipHandler?.(payload.isPlaying, payload.title);
 }
+
+export function broadcastLibraryUpdated(payload: { bookIds: number[] }): void {
+  for (const win of [mainWindow, miniPlayerWindow]) {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(IPC_CHANNELS.library.UPDATED, payload);
+    }
+  }
+}
+
+/** Fan-out main → renderer(s) for mpv-driven playback events. */
+export function broadcastPlaybackChannel(channel: string, ...payload: unknown[]): void {
+  for (const win of [mainWindow, miniPlayerWindow]) {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(channel, ...payload);
+    }
+  }
+}

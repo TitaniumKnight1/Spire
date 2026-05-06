@@ -5,10 +5,11 @@ import Database from "better-sqlite3";
 type SqliteDatabase = InstanceType<typeof Database>;
 import { app } from "electron";
 import type { ListeningStats } from "../../shared/library-types.js";
+import { isMagnetLikeString, parseMagnetDisplayName } from "../../shared/magnet-display.js";
 import { getDatabasePath, getLibraryDirectory, getStagingDirectoryRoot } from "../utils/paths.js";
 
 const SCHEMA_VERSION_KEY = "schema_version";
-const CURRENT_SCHEMA_VERSION = "3";
+const CURRENT_SCHEMA_VERSION = "4";
 
 const MIGRATION_SQL = `
 CREATE TABLE IF NOT EXISTS books (
@@ -108,6 +109,13 @@ function migrateDatabaseSchema(db: SqliteDatabase, fromVersion: string): void {
     const names = new Set(cols.map((c) => c.name));
     if (!names.has("error_message")) {
       db.exec(`ALTER TABLE downloads ADD COLUMN error_message TEXT`);
+    }
+  }
+  if (fromVersion === "3") {
+    const cols = db.prepare(`PRAGMA table_info(downloads)`).all() as { name: string }[];
+    const names = new Set(cols.map((c) => c.name));
+    if (!names.has("display_name")) {
+      db.exec(`ALTER TABLE downloads ADD COLUMN display_name TEXT`);
     }
   }
 }
@@ -315,7 +323,20 @@ export function upsertChapter(row: ChapterInsert): number {
 }
 
 export function upsertProgress(row: ProgressUpsert): void {
+  const bookId = row.book_id;
+  if (!getBookById(bookId)) {
+    return;
+  }
   const db = getDatabase();
+  let currentFileId = row.current_file_id ?? null;
+  if (currentFileId != null) {
+    const ok = db
+      .prepare(`SELECT 1 AS ok FROM files WHERE id = ? AND book_id = ? LIMIT 1`)
+      .get(currentFileId, bookId) as { ok: number } | undefined;
+    if (!ok) {
+      currentFileId = null;
+    }
+  }
   db.prepare(
     `INSERT INTO progress (book_id, current_file_id, position_seconds, playback_speed, last_listened_at, completed_at)
      VALUES (?, ?, ?, ?, ?, ?)
@@ -326,8 +347,8 @@ export function upsertProgress(row: ProgressUpsert): void {
        last_listened_at = excluded.last_listened_at,
        completed_at = excluded.completed_at`,
   ).run(
-    row.book_id,
-    row.current_file_id ?? null,
+    bookId,
+    currentFileId,
     row.position_seconds ?? 0,
     row.playback_speed ?? 1,
     row.last_listened_at ?? null,
@@ -562,9 +583,26 @@ export type DownloadRow = {
   error_message: string | null;
 };
 
+function sanitizeDownloadDisplayNameForInsert(row: DownloadInsert): string | null {
+  const explicit = row.display_name?.trim();
+  if (explicit) {
+    if (isMagnetLikeString(explicit)) {
+      return parseMagnetDisplayName(row.source_url ?? undefined) ?? null;
+    }
+    return explicit;
+  }
+  const url = row.source_url?.trim() ?? "";
+  const st = row.source_type ?? "";
+  if ((st === "magnet" || url.toLowerCase().startsWith("magnet:")) && url) {
+    return parseMagnetDisplayName(url) ?? null;
+  }
+  return null;
+}
+
 export function insertDownload(row: DownloadInsert): number {
   const db = getDatabase();
   const now = new Date().toISOString();
+  const displayName = sanitizeDownloadDisplayNameForInsert(row);
   const result = db
     .prepare(
       `INSERT INTO downloads (
@@ -577,7 +615,7 @@ export function insertDownload(row: DownloadInsert): number {
       row.status ?? "queued",
       row.progress_pct ?? 0,
       now,
-      row.display_name ?? null,
+      displayName,
       row.torrent_info_hash ?? null,
       null,
     );
@@ -618,6 +656,25 @@ export function updateDownloadTorrentMeta(
   if (partial.torrent_info_hash !== undefined) {
     db.prepare(`UPDATE downloads SET torrent_info_hash = ? WHERE id = ?`).run(partial.torrent_info_hash, id);
   }
+}
+
+/** Persist human-readable download label (`downloads.display_name`). */
+export function updateDownloadDisplayName(id: number, name: string): void {
+  let n = name.trim();
+  if (!n) {
+    return;
+  }
+  if (isMagnetLikeString(n)) {
+    const row = getDownloadById(id);
+    const fromSource = parseMagnetDisplayName(row?.source_url ?? undefined);
+    const fromName = parseMagnetDisplayName(n);
+    n = (fromSource ?? fromName ?? "").trim();
+    if (!n) {
+      return;
+    }
+  }
+  const db = getDatabase();
+  db.prepare(`UPDATE downloads SET display_name = ? WHERE id = ?`).run(n, id);
 }
 
 export function updateDownloadCompletedAt(id: number, completedAt: string | null): void {

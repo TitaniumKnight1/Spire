@@ -28,6 +28,8 @@ export const useDownloadStore = create<DownloadState>((set) => ({
           started_at: item.started_at ?? null,
           completed_at: item.completed_at ?? null,
           display_name: item.display_name ?? null,
+          displayName: item.displayName ?? item.display_name ?? null,
+          source_url: item.source_url ?? null,
           speed_bps: item.speed_bps ?? 0,
           eta_seconds: item.eta_seconds ?? null,
           error_message: item.error_message ?? null,

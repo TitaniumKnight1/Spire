@@ -1,10 +1,13 @@
 import { type ChangeEvent, type CSSProperties, type ReactElement, useCallback, useState } from "react";
 import type { EqPreset } from "@shared/library-types";
+import { IPC_CHANNELS } from "@shared/ipc-channels";
+import { useIPC } from "../../hooks/useIPC.js";
 import { usePlayer, SPEED_CYCLE_SEQUENCE } from "../../hooks/usePlayer.js";
 import { usePlayerStore } from "../../store/playerStore.js";
 import { formatDuration } from "../../utils/formatDuration.js";
 
 export function PlayerBar(): ReactElement | null {
+  const { invoke } = useIPC();
   const {
     togglePlay,
     seekBy,
@@ -35,6 +38,16 @@ export function PlayerBar(): ReactElement | null {
 
   const skipSilenceEnabled = usePlayerStore((s) => s.skipSilenceEnabled);
   const eqPreset = usePlayerStore((s) => s.eqPreset);
+  const playbackError = usePlayerStore((s) => s.playbackError);
+  const volume = usePlayerStore((s) => s.volume);
+
+  const setVolume = useCallback(
+    (level: number) => {
+      void invoke(IPC_CHANNELS.playback.SET_VOLUME, level).catch(() => {});
+      usePlayerStore.getState().setVolume(level);
+    },
+    [invoke],
+  );
 
   const onSeekInput = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
@@ -69,6 +82,8 @@ export function PlayerBar(): ReactElement | null {
   }
 
   const maxSeek = duration > 0 ? duration : Math.max(position, 1);
+  const seekPct = `${(Math.min(position, maxSeek) / maxSeek) * 100}%`;
+  const seekSliderStyle = { flex: 1, "--seek-pct": seekPct } as CSSProperties;
   const speedLabel = SPEED_CYCLE_SEQUENCE.some((s) => Math.abs(s - speed) < 0.02)
     ? `${speed}x`
     : `${speed.toFixed(2)}x`;
@@ -77,24 +92,47 @@ export function PlayerBar(): ReactElement | null {
     <footer
       style={{
         flexShrink: 0,
-        borderTop: "1px solid #2a2a2a",
-        background: "#121212",
-        padding: "10px 16px",
-        display: "grid",
-        gridTemplateColumns: "200px 1fr auto",
-        alignItems: "center",
-        gap: 16,
+        borderTop: "1px solid var(--border-subtle)",
+        background: "var(--bg-surface)",
+        minHeight: 72,
+        padding: "0 24px",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "center",
+        gap: 0,
         zIndex: 45,
       }}
     >
+      {playbackError ? (
+        <div
+          role="alert"
+          style={{
+            fontSize: 12,
+            color: "var(--color-warning, #c27803)",
+            padding: "6px 0 4px",
+            borderBottom: "1px solid var(--border-subtle)",
+          }}
+        >
+          {playbackError}
+        </div>
+      ) : null}
+      <div
+        style={{
+          height: 72,
+          display: "grid",
+          gridTemplateColumns: "200px 1fr auto",
+          alignItems: "center",
+          gap: 16,
+        }}
+      >
       <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
         <div
           style={{
-            width: 56,
-            height: 56,
-            borderRadius: 8,
+            width: 44,
+            height: 44,
+            borderRadius: "var(--radius-sm)",
             overflow: "hidden",
-            background: "#222",
+            background: "var(--bg-elevated)",
             flexShrink: 0,
           }}
         >
@@ -110,7 +148,7 @@ export function PlayerBar(): ReactElement | null {
                 justifyContent: "center",
                 fontSize: 18,
                 fontWeight: 700,
-                color: "#555",
+                color: "var(--text-muted)",
               }}
             >
               {(currentBook.title || "?").slice(0, 1).toUpperCase()}
@@ -118,10 +156,10 @@ export function PlayerBar(): ReactElement | null {
           )}
         </div>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          <div style={{ fontWeight: 500, fontSize: 13, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {currentBook.title}
           </div>
-          <div style={{ fontSize: 12, color: "#888", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {currentBook.author ?? "Unknown author"}
           </div>
         </div>
@@ -140,13 +178,15 @@ export function PlayerBar(): ReactElement | null {
             onClick={() => togglePlay()}
             style={{
               ...iconBtn,
-              padding: "10px 20px",
-              fontWeight: 700,
-              background: "#2a6cff",
-              borderColor: "#2a6cff",
+              fontSize: 20,
+              lineHeight: 1,
+              padding: "4px 12px",
+              border: "none",
+              background: "transparent",
+              color: "var(--text-primary)",
             }}
           >
-            {isPlaying ? "Pause" : "Play"}
+            {isPlaying ? "⏸" : "▶"}
           </button>
           <button type="button" onClick={() => nextChapter()} style={iconBtn} title="Next chapter">
             Ch+
@@ -155,8 +195,8 @@ export function PlayerBar(): ReactElement | null {
             +30s
           </button>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 11, color: "#888", width: 44, textAlign: "right" }}>{formatDuration(position)}</span>
+        <div className="seek-wrap">
+          <span style={{ fontSize: 11, color: "var(--text-muted)", width: 44, textAlign: "right" }}>{formatDuration(position)}</span>
           <input
             type="range"
             min={0}
@@ -164,10 +204,11 @@ export function PlayerBar(): ReactElement | null {
             step={0.25}
             value={Math.min(position, maxSeek)}
             onChange={onSeekInput}
-            style={{ flex: 1, accentColor: "#2a6cff" }}
+            className="seek-slider"
+            style={seekSliderStyle}
             aria-label="Seek"
           />
-          <span style={{ fontSize: 11, color: "#888", width: 44 }}>{formatDuration(duration)}</span>
+          <span style={{ fontSize: 11, color: "var(--text-muted)", width: 44 }}>{formatDuration(duration)}</span>
         </div>
       </div>
 
@@ -177,8 +218,9 @@ export function PlayerBar(): ReactElement | null {
           onClick={onSkipSilence}
           style={{
             ...iconBtn,
-            borderColor: skipSilenceEnabled ? "#4a7a4a" : "#333",
-            background: skipSilenceEnabled ? "#1a2a18" : "#1c1c1c",
+            borderColor: skipSilenceEnabled ? "var(--accent)" : "var(--border-default)",
+            color: skipSilenceEnabled ? "var(--accent)" : "var(--text-muted)",
+            background: skipSilenceEnabled ? "var(--accent-soft)" : "transparent",
           }}
           title="Skip silence"
         >
@@ -191,8 +233,9 @@ export function PlayerBar(): ReactElement | null {
             onClick={() => setEqOpen((o) => !o)}
             style={{
               ...iconBtn,
-              borderColor: eqPreset !== "flat" ? "#4a6a9a" : "#333",
-              background: eqPreset !== "flat" ? "#1a1e2a" : "#1c1c1c",
+              borderColor: eqPreset !== "flat" ? "var(--accent)" : "var(--border-default)",
+              color: eqPreset !== "flat" ? "var(--accent)" : "var(--text-muted)",
+              background: eqPreset !== "flat" ? "var(--accent-soft)" : "transparent",
             }}
             title="EQ preset"
           >
@@ -206,15 +249,14 @@ export function PlayerBar(): ReactElement | null {
                 bottom: "100%",
                 right: 0,
                 marginBottom: 8,
-                background: "#1e1e1e",
-                border: "1px solid #333",
-                borderRadius: 8,
+                background: "var(--bg-elevated)",
+                border: "1px solid var(--border-default)",
+                borderRadius: "var(--radius-md)",
                 padding: 8,
                 minWidth: 160,
-                boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
               }}
             >
-              <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>EQ preset</div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>EQ preset</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {(
                   [
@@ -228,7 +270,8 @@ export function PlayerBar(): ReactElement | null {
                     type="button"
                     style={{
                       ...menuBtn,
-                      background: eqPreset === id ? "#2a3550" : "transparent",
+                      background: eqPreset === id ? "var(--bg-hover)" : "transparent",
+                      color: eqPreset === id ? "var(--text-primary)" : "var(--text-secondary)",
                     }}
                     onClick={() => applyEq(id)}
                   >
@@ -244,14 +287,44 @@ export function PlayerBar(): ReactElement | null {
           {speedLabel}
         </button>
 
+        <label
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            verticalAlign: "middle",
+            fontSize: 12,
+            color: "var(--text-muted)",
+            cursor: "pointer",
+          }}
+          title="Volume"
+        >
+          <span aria-hidden="true">🔊</span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            value={volume}
+            onChange={(e) => setVolume(Number(e.target.value))}
+            style={{
+              width: 80,
+              verticalAlign: "middle",
+              accentColor: "var(--accent)",
+            }}
+            aria-label="Volume"
+          />
+        </label>
+
         <div style={{ position: "relative" }}>
           <button
             type="button"
             onClick={() => setSleepOpen((o) => !o)}
             style={{
               ...iconBtn,
-              borderColor: sleepTimer ? "#4a6a3a" : "#333",
-              background: sleepTimer ? "#1a2a18" : "#1c1c1c",
+              borderColor: sleepTimer ? "var(--accent)" : "var(--border-default)",
+              color: sleepTimer ? "var(--accent)" : "var(--text-muted)",
+              background: sleepTimer ? "var(--accent-soft)" : "transparent",
             }}
             title="Sleep timer"
           >
@@ -265,15 +338,14 @@ export function PlayerBar(): ReactElement | null {
                 bottom: "100%",
                 right: 0,
                 marginBottom: 8,
-                background: "#1e1e1e",
-                border: "1px solid #333",
-                borderRadius: 8,
+                background: "var(--bg-elevated)",
+                border: "1px solid var(--border-default)",
+                borderRadius: "var(--radius-md)",
                 padding: 8,
                 minWidth: 200,
-                boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
               }}
             >
-              <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>Sleep timer</div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>Sleep timer</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <button
                   type="button"
@@ -309,6 +381,36 @@ export function PlayerBar(): ReactElement | null {
                   type="button"
                   style={menuBtn}
                   onClick={() => {
+                    setSleepTimer({ mode: "minutes", minutes: 30 });
+                    setSleepOpen(false);
+                  }}
+                >
+                  30 minutes
+                </button>
+                <button
+                  type="button"
+                  style={menuBtn}
+                  onClick={() => {
+                    setSleepTimer({ mode: "minutes", minutes: 45 });
+                    setSleepOpen(false);
+                  }}
+                >
+                  45 minutes
+                </button>
+                <button
+                  type="button"
+                  style={menuBtn}
+                  onClick={() => {
+                    setSleepTimer({ mode: "minutes", minutes: 60 });
+                    setSleepOpen(false);
+                  }}
+                >
+                  60 minutes
+                </button>
+                <button
+                  type="button"
+                  style={menuBtn}
+                  onClick={() => {
                     setSleepTimer({ mode: "end-of-chapter" });
                     setSleepOpen(false);
                   }}
@@ -338,7 +440,8 @@ export function PlayerBar(): ReactElement | null {
           onClick={() => setShowChapterPanel(!showChapterPanel)}
           style={{
             ...iconBtn,
-            background: showChapterPanel ? "#2a2a3a" : "#1c1c1c",
+            background: showChapterPanel ? "var(--bg-hover)" : "transparent",
+            color: showChapterPanel ? "var(--text-primary)" : "var(--text-muted)",
           }}
           title="Chapters"
         >
@@ -349,34 +452,37 @@ export function PlayerBar(): ReactElement | null {
           onClick={() => setShowBookmarksPanel(!showBookmarksPanel)}
           style={{
             ...iconBtn,
-            background: showBookmarksPanel ? "#2a2a3a" : "#1c1c1c",
+            background: showBookmarksPanel ? "var(--bg-hover)" : "transparent",
+            color: showBookmarksPanel ? "var(--text-primary)" : "var(--text-muted)",
           }}
           title="Bookmarks"
         >
           Bmarks
         </button>
       </div>
+      </div>
     </footer>
   );
 }
 
 const iconBtn: CSSProperties = {
-  padding: "8px 10px",
-  borderRadius: 8,
-  border: "1px solid #333",
-  background: "#1c1c1c",
-  color: "#e8e8e8",
+  padding: "6px 10px",
+  borderRadius: "var(--radius-md)",
+  border: "1px solid transparent",
+  background: "transparent",
+  color: "var(--text-secondary)",
   cursor: "pointer",
   fontSize: 12,
+  transition: "color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast)",
 };
 
 const menuBtn: CSSProperties = {
   textAlign: "left",
   padding: "8px 10px",
-  borderRadius: 6,
+  borderRadius: "var(--radius-sm)",
   border: "1px solid transparent",
   background: "transparent",
-  color: "#e8e8e8",
+  color: "var(--text-secondary)",
   cursor: "pointer",
   fontSize: 13,
 };

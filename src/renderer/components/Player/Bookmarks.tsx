@@ -21,17 +21,17 @@ export function Bookmarks(): ReactElement | null {
         bottom: 0,
         right: 0,
         width: 280,
-        background: "#161616",
-        borderLeft: "1px solid #2a2a2a",
+        background: "var(--bg-surface)",
+        borderLeft: "1px solid var(--border-subtle)",
         zIndex: 34,
         display: "flex",
         flexDirection: "column",
         padding: "12px 0",
       }}
     >
-      <div style={{ padding: "0 16px 8px", fontWeight: 600, fontSize: 13, color: "#aaa" }}>Bookmarks</div>
+      <div style={{ padding: "0 16px 8px", fontWeight: 600, fontSize: 13, color: "var(--text-secondary)" }}>Bookmarks</div>
       {bookmarks.length === 0 ? (
-        <p style={{ padding: "8px 16px", margin: 0, fontSize: 13, color: "#666", lineHeight: 1.5 }}>
+        <p style={{ padding: "8px 16px", margin: 0, fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>
           No bookmarks yet — press the bookmark button while listening.
         </p>
       ) : (
@@ -42,7 +42,7 @@ export function Bookmarks(): ReactElement | null {
               style={{
                 display: "flex",
                 alignItems: "stretch",
-                borderBottom: "1px solid #222",
+                borderBottom: "1px solid var(--border-subtle)",
               }}
             >
               <button
@@ -54,15 +54,15 @@ export function Bookmarks(): ReactElement | null {
                   padding: "10px 12px",
                   border: "none",
                   background: "transparent",
-                  color: "#e8e8e8",
+                  color: "var(--text-primary)",
                   cursor: "pointer",
                   fontSize: 13,
                 }}
               >
-                <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, color: "#8ab4ff" }}>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--accent)" }}>
                   {formatHhMmSs(b.position_seconds)}
                 </div>
-                {b.note ? <div style={{ marginTop: 4, color: "#bbb" }}>{b.note}</div> : null}
+                {b.note ? <div style={{ marginTop: 4, color: "var(--text-secondary)" }}>{b.note}</div> : null}
               </button>
               <button
                 type="button"
@@ -76,7 +76,7 @@ export function Bookmarks(): ReactElement | null {
                   flexShrink: 0,
                   border: "none",
                   background: "transparent",
-                  color: "#c66",
+                  color: "var(--color-error)",
                   cursor: "pointer",
                   fontSize: 16,
                 }}

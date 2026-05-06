@@ -1,5 +1,4 @@
 import { app, ipcMain } from "electron";
-import { autoUpdater } from "electron-updater";
 import { IPC_CHANNELS } from "../../shared/ipc-channels.js";
 import type { StatsSummary } from "../../shared/library-types.js";
 import {
@@ -15,6 +14,31 @@ export const SETTINGS_KEY_EQ_PRESET = "eq_preset";
 export const SETTINGS_KEY_DEFAULT_SPEED = "default_speed";
 export const SETTINGS_KEY_DEFAULT_SLEEP_TIMER = "default_sleep_timer";
 export const SETTINGS_KEY_AUTO_FETCH_COVERS = "auto_fetch_covers";
+/** Stored JSON: `{"host":"127.0.0.1","port":1080}` — used when constructing WebTorrent (one-shot at startup). */
+export const SETTINGS_KEY_TORRENT_PROXY = "torrent_proxy";
+
+export type TorrentProxySetting = { host: string; port: number };
+
+export function parseTorrentProxySetting(raw: string | null): TorrentProxySetting | null {
+  if (!raw || raw.trim() === "") {
+    return null;
+  }
+  try {
+    const o = JSON.parse(raw) as { host?: unknown; port?: unknown };
+    if (!o || typeof o !== "object") {
+      return null;
+    }
+    const host = typeof o.host === "string" ? o.host.trim() : "";
+    const portNum =
+      typeof o.port === "number" ? o.port : typeof o.port === "string" ? Number(o.port) : Number.NaN;
+    if (!host || !Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
+      return null;
+    }
+    return { host, port: portNum };
+  } catch {
+    return null;
+  }
+}
 
 const EQ_PRESET_SET = new Set<string>(["flat", "voice-clarity", "bass-boost"]);
 
@@ -163,10 +187,39 @@ export function registerSettingsIpc(deps: SettingsIpcDeps): void {
     return { ok: true };
   });
 
+  ipcMain.handle(IPC_CHANNELS.settings.SETTINGS_GET_TORRENT_PROXY, async (): Promise<TorrentProxySetting | null> => {
+    const raw = getAppSetting(SETTINGS_KEY_TORRENT_PROXY);
+    return parseTorrentProxySetting(raw);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.settings.SETTINGS_SAVE_TORRENT_PROXY,
+    async (_event, payload: unknown): Promise<{ ok: boolean }> => {
+      if (payload === null) {
+        setAppSetting(SETTINGS_KEY_TORRENT_PROXY, "");
+        return { ok: true };
+      }
+      if (!payload || typeof payload !== "object") {
+        return { ok: false };
+      }
+      const p = payload as { host?: unknown; port?: unknown };
+      const host = typeof p.host === "string" ? p.host.trim() : "";
+      const portNum =
+        typeof p.port === "number" ? p.port : typeof p.port === "string" ? Number(p.port) : Number.NaN;
+      if (!host || !Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
+        return { ok: false };
+      }
+      setAppSetting(SETTINGS_KEY_TORRENT_PROXY, JSON.stringify({ host, port: portNum }));
+      return { ok: true };
+    },
+  );
+
   ipcMain.handle(IPC_CHANNELS.settings.APP_RESTART_TO_UPDATE, async (): Promise<{ ok: boolean }> => {
     if (!app.isPackaged) {
       return { ok: false };
     }
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { autoUpdater } = require("electron-updater");
     setImmediate(() => {
       autoUpdater.quitAndInstall();
     });

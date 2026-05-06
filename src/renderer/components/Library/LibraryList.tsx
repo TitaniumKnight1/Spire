@@ -37,22 +37,80 @@ function EmptyLibrary({
       style={{
         flex: 1,
         minHeight: 360,
-        border: dragActive ? "2px dashed #4a8fd4" : "2px dashed #333",
+        border: dragActive ? "2px dashed var(--accent)" : "2px dashed var(--border-default)",
         borderRadius: 16,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: 16,
-        color: "#888",
+        gap: 20,
+        padding: "80px 40px",
+        textAlign: "center",
         cursor: "pointer",
-        background: dragActive ? "#121820" : "#121212",
+        background: dragActive ? "var(--accent-soft)" : "transparent",
+        transition: "all 150ms ease",
       }}
     >
-      <div style={{ fontSize: 48, opacity: 0.35 }}>📚</div>
-      <div style={{ fontSize: 16, color: "#bbb", textAlign: "center", maxWidth: 360, padding: "0 16px" }}>
-        Drop audiobooks here or click to browse
+      <svg width="80" height="80" viewBox="0 0 80 80" fill="none" aria-hidden="true">
+        <path
+          d="M16 44V36C16 22.7 26.7 12 40 12C53.3 12 64 22.7 64 36V44"
+          stroke="var(--text-muted)"
+          strokeWidth="3"
+          strokeLinecap="round"
+          fill="none"
+        />
+        <rect
+          x="10"
+          y="42"
+          width="14"
+          height="20"
+          rx="6"
+          fill="var(--bg-elevated)"
+          stroke="var(--border-strong)"
+          strokeWidth="1.5"
+        />
+        <rect
+          x="56"
+          y="42"
+          width="14"
+          height="20"
+          rx="6"
+          fill="var(--bg-elevated)"
+          stroke="var(--border-strong)"
+          strokeWidth="1.5"
+        />
+        <circle cx="17" cy="52" r="3" fill="var(--accent)" opacity={0.8} />
+        <circle cx="63" cy="52" r="3" fill="var(--accent)" opacity={0.8} />
+      </svg>
+
+      <div>
+        <p
+          style={{
+            fontSize: 18,
+            fontWeight: 600,
+            color: "var(--text-primary)",
+            marginBottom: 8,
+            letterSpacing: "-0.01em",
+          }}
+        >
+          Your library is empty
+        </p>
+        <p style={{ fontSize: 14, color: "var(--text-muted)", maxWidth: 280, lineHeight: 1.6 }}>
+          Drop audiobook files or folders here, or use the button above to browse your files
+        </p>
       </div>
+
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          void onBrowse();
+        }}
+        className="btn-primary"
+        style={{ marginTop: 4 }}
+      >
+        Add your first book
+      </button>
     </div>
   );
 }
@@ -63,8 +121,8 @@ const headerRowStyle = {
   gap: 8,
   padding: "8px 12px",
   fontSize: 12,
-  color: "#777",
-  borderBottom: "1px solid #222",
+  color: "var(--text-muted)",
+  borderBottom: "1px solid var(--border-subtle)",
 };
 
 const rowStyle = {
@@ -74,8 +132,8 @@ const rowStyle = {
   alignItems: "center",
   padding: "8px 12px",
   border: "none",
-  borderRadius: 8,
-  background: "#161616",
+  borderRadius: "var(--radius-md)",
+  background: "var(--bg-elevated)",
   color: "inherit",
   cursor: "pointer",
   textAlign: "left" as const,
@@ -125,13 +183,13 @@ export function LibraryList({
                   height: 40,
                   borderRadius: 6,
                   overflow: "hidden",
-                  background: "#2a2a2a",
+                  background: "var(--bg-surface)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   fontSize: 12,
                   fontWeight: 700,
-                  color: "#666",
+                  color: "var(--text-muted)",
                 }}
               >
                 {book.cover_art_url ? (
@@ -143,21 +201,26 @@ export function LibraryList({
               <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {book.title}
               </span>
-              <span style={{ color: "#9a9a9a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {book.author ?? "—"}
               </span>
-              <span style={{ color: "#888", fontSize: 13 }}>{formatDuration(book.total_duration)}</span>
+              <span style={{ color: "var(--text-muted)", fontSize: 13 }}>{formatDuration(book.total_duration)}</span>
               <div>
-                <div style={{ height: 4, borderRadius: 2, background: "#2a2a2a", overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${pct}%`, background: "#4a8fd4" }} />
+                <div style={{ height: 4, borderRadius: 2, background: "var(--border-default)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${pct}%`, background: "var(--accent)" }} />
                 </div>
-                <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>{pct.toFixed(0)}%</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{pct.toFixed(0)}%</div>
               </div>
               <span
                 style={{
                   fontSize: 11,
                   fontWeight: 600,
-                  color: badge === "Finished" ? "#6abf69" : badge === "In Progress" ? "#d4a84a" : "#777",
+                  color:
+                    badge === "Finished"
+                      ? "var(--color-success)"
+                      : badge === "In Progress"
+                        ? "var(--color-warning)"
+                        : "var(--text-muted)",
                 }}
               >
                 {badge}
@@ -175,7 +238,7 @@ export function LibraryList({
       <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
         {groups.map((g) => (
           <div key={g.label}>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, color: "#ccc" }}>{g.label}</div>
+            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 12, color: "var(--text-muted)", letterSpacing: "0.06em", textTransform: "uppercase" }}>{g.label}</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>{renderRows(g.books)}</div>
           </div>
         ))}

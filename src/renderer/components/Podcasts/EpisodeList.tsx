@@ -77,14 +77,7 @@ export function EpisodeList(props: EpisodeListProps): ReactElement {
         <button
           type="button"
           onClick={props.onBack}
-          style={{
-            padding: "8px 14px",
-            borderRadius: 8,
-            border: "1px solid #444",
-            background: "#1a1a1a",
-            color: "#e8e8e8",
-            cursor: "pointer",
-          }}
+          className="btn-secondary"
         >
           ← Back
         </button>
@@ -93,22 +86,15 @@ export function EpisodeList(props: EpisodeListProps): ReactElement {
           type="button"
           disabled={queueBusy || !payload?.episodes.length}
           onClick={() => void onDownloadAll()}
-          style={{
-            padding: "8px 14px",
-            borderRadius: 8,
-            border: "1px solid #3584e4",
-            background: "#1a2840",
-            color: "#e8e8e8",
-            cursor: queueBusy ? "wait" : "pointer",
-            whiteSpace: "nowrap",
-          }}
+          className="btn-primary"
+          style={{ cursor: queueBusy ? "wait" : "pointer", whiteSpace: "nowrap" }}
         >
           Download all
         </button>
       </div>
 
-      {loading ? <p style={{ color: "#9a9a9a" }}>Loading episodes…</p> : null}
-      {error ? <p style={{ color: "#f66" }}>{error}</p> : null}
+      {loading ? <p style={{ color: "var(--text-muted)" }}>Loading episodes…</p> : null}
+      {error ? <p style={{ color: "var(--color-error)" }}>{error}</p> : null}
 
       {!loading && payload ? (
         <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -120,15 +106,13 @@ export function EpisodeList(props: EpisodeListProps): ReactElement {
                 flexWrap: "wrap",
                 alignItems: "center",
                 gap: 12,
-                padding: "10px 12px",
-                borderRadius: 8,
-                border: "1px solid #2a2a2a",
-                background: "#111",
+                padding: "12px 0",
+                borderBottom: "1px solid var(--border-subtle)",
               }}
             >
               <div style={{ flex: "1 1 200px", minWidth: 0 }}>
                 <div style={{ fontWeight: 600 }}>{ep.title}</div>
-                <div style={{ fontSize: 13, color: "#9a9a9a", marginTop: 4 }}>
+                <div style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 4 }}>
                   {formatDuration(ep.duration)}
                   {ep.pubDate
                     ? ` · ${new Date(ep.pubDate).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`
@@ -138,15 +122,8 @@ export function EpisodeList(props: EpisodeListProps): ReactElement {
               <button
                 type="button"
                 onClick={() => void onDownloadOne(ep)}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: 6,
-                  border: "1px solid #2ec27e",
-                  background: "#102818",
-                  color: "#e8e8e8",
-                  cursor: "pointer",
-                  fontSize: 13,
-                }}
+                className="btn-secondary"
+                style={{ padding: "5px 12px" }}
               >
                 Download
               </button>

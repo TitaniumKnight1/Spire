@@ -39,9 +39,9 @@ export function BookCard({
       style={{
         display: "flex",
         flexDirection: "column",
-        borderRadius: 12,
-        border: "1px solid #2a2a2a",
-        background: "#161616",
+        borderRadius: "var(--radius-lg)",
+        border: "1px solid var(--border-subtle)",
+        background: "var(--bg-surface)",
         padding: 0,
         cursor: "pointer",
         textAlign: "left",
@@ -54,7 +54,7 @@ export function BookCard({
         style={{
           aspectRatio: "1",
           width: "100%",
-          background: "#222",
+          background: "var(--bg-elevated)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -68,7 +68,7 @@ export function BookCard({
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
         ) : (
-          <span style={{ fontSize: 36, fontWeight: 700, color: "#666" }}>{initials(book.title, book.author)}</span>
+          <span style={{ fontSize: 36, fontWeight: 700, color: "var(--text-muted)" }}>{initials(book.title, book.author)}</span>
         )}
         <span
           style={{
@@ -79,8 +79,18 @@ export function BookCard({
             fontWeight: 600,
             padding: "2px 8px",
             borderRadius: 6,
-            background: badge === "Finished" ? "#1e3a1e" : badge === "In Progress" ? "#2a2510" : "#252525",
-            color: "#ccc",
+            background:
+              badge === "Finished"
+                ? "rgba(74, 222, 128, 0.12)"
+                : badge === "In Progress"
+                  ? "rgba(251, 191, 36, 0.12)"
+                  : "var(--bg-hover)",
+            color:
+              badge === "Finished"
+                ? "var(--color-success)"
+                : badge === "In Progress"
+                  ? "var(--color-warning)"
+                  : "var(--text-secondary)",
           }}
         >
           {badge}
@@ -101,7 +111,7 @@ export function BookCard({
         <div
           style={{
             fontSize: 13,
-            color: "#9a9a9a",
+            color: "var(--text-secondary)",
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis",
@@ -109,13 +119,13 @@ export function BookCard({
         >
           {book.author ?? "Unknown author"}
         </div>
-        <div style={{ fontSize: 12, color: "#666", marginTop: 2 }}>{formatDuration(book.total_duration)}</div>
+        <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>{formatDuration(book.total_duration)}</div>
         <div style={{ marginTop: "auto", paddingTop: 8 }}>
           <div
             style={{
               height: 4,
               borderRadius: 2,
-              background: "#2a2a2a",
+              background: "var(--border-default)",
               overflow: "hidden",
             }}
           >
@@ -123,12 +133,12 @@ export function BookCard({
               style={{
                 height: "100%",
                 width: `${pct}%`,
-                background: "#4a8fd4",
+                background: "var(--accent)",
                 borderRadius: 2,
               }}
             />
           </div>
-          <div style={{ fontSize: 11, color: "#777", marginTop: 4 }}>{pct.toFixed(0)}% complete</div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{pct.toFixed(0)}% complete</div>
         </div>
       </div>
     </button>

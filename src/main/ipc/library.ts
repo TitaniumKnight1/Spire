@@ -11,6 +11,7 @@ import type {
   LibraryUpdateTagsPayload,
   MetadataUpdate,
 } from "../../shared/library-types.js";
+import { broadcastLibraryUpdated } from "../broadcast-state.js";
 import {
   copyUserCoverToLibrary,
   fetchCoverArt,
@@ -18,6 +19,7 @@ import {
   getBookListItemById,
   getLibrary,
   ingestPaths,
+  reingestBookMetadata,
   removeBook,
 } from "../services/library.js";
 import {
@@ -102,6 +104,22 @@ export function registerLibraryIpc(): void {
     return getBookDetail(id);
   });
 
+  ipcMain.handle(
+    IPC_CHANNELS.library.REINGEST_BOOK_METADATA,
+    async (_event, bookId: unknown): Promise<BookDetailPayload | null> => {
+      const id = asFiniteNumber(bookId);
+      if (id == null || id <= 0) {
+        return null;
+      }
+      if (!getBookById(id)) {
+        return null;
+      }
+      await reingestBookMetadata(id);
+      broadcastLibraryUpdated({ bookIds: [id] });
+      return getBookDetail(id);
+    },
+  );
+
   ipcMain.handle(IPC_CHANNELS.library.DELETE_BOOK, async (_event, bookId: unknown): Promise<LibraryDeleteResult> => {
     const id = typeof bookId === "number" ? bookId : Number(bookId);
     if (!Number.isFinite(id)) {
@@ -115,7 +133,13 @@ export function registerLibraryIpc(): void {
     const win = BrowserWindow.fromWebContents(event.sender);
     const options: OpenDialogOptions = {
       properties: ["openFile", "openDirectory", "multiSelections"],
-      filters: [{ name: "Audio", extensions: ["mp3", "m4a", "m4b", "aac", "flac", "ogg", "opus", "wav"] }],
+      filters: [
+        {
+          name: "Audio Files",
+          extensions: ["mp3", "m4a", "m4b", "aac", "flac", "ogg", "opus", "wav", "wma", "aiff"],
+        },
+        { name: "All Files", extensions: ["*"] },
+      ],
     };
     const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
     if (result.canceled) {

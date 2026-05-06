@@ -43,8 +43,8 @@ export function MiniPlayer(): ReactElement {
           alignItems: "center",
           gap: 10,
           padding: "8px 12px",
-          background: "#121212",
-          borderBottom: "1px solid #2a2a2a",
+          background: "var(--bg-surface)",
+          borderBottom: "1px solid var(--border-subtle)",
           WebkitAppRegion: "drag",
           userSelect: "none",
       })}
@@ -53,9 +53,9 @@ export function MiniPlayer(): ReactElement {
         style={electronDragStyle({
             width: 52,
             height: 52,
-            borderRadius: 8,
+            borderRadius: "var(--radius-sm)",
             overflow: "hidden",
-            background: "#222",
+            background: "var(--bg-elevated)",
             flexShrink: 0,
             WebkitAppRegion: "no-drag",
         })}
@@ -72,7 +72,7 @@ export function MiniPlayer(): ReactElement {
               justifyContent: "center",
               fontSize: 16,
               fontWeight: 700,
-              color: "#555",
+              color: "var(--text-muted)",
             }}
           >
             {(title || "?").slice(0, 1).toUpperCase()}
@@ -88,7 +88,7 @@ export function MiniPlayer(): ReactElement {
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis",
-            color: "#e8e8e8",
+            color: "var(--text-primary)",
           }}
         >
           {title}
@@ -97,7 +97,7 @@ export function MiniPlayer(): ReactElement {
           <div
             style={{
               fontSize: 11,
-              color: "#888",
+              color: "var(--text-muted)",
               whiteSpace: "nowrap",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -127,7 +127,7 @@ export function MiniPlayer(): ReactElement {
         <button type="button" style={btn} onClick={() => void send("next")} title="Next file">
           ⏭
         </button>
-        <button type="button" style={{ ...btn, color: "#e88" }} onClick={() => void send("close")} title="Close mini player">
+        <button type="button" style={{ ...btn, color: "var(--color-error)" }} onClick={() => void send("close")} title="Close mini player">
           ✕
         </button>
       </div>
@@ -137,10 +137,10 @@ export function MiniPlayer(): ReactElement {
 
 const btn: CSSProperties = {
   padding: "6px 10px",
-  borderRadius: 8,
-  border: "1px solid #333",
-  background: "#1c1c1c",
-  color: "#e8e8e8",
+  borderRadius: "var(--radius-md)",
+  border: "1px solid var(--border-default)",
+  background: "transparent",
+  color: "var(--text-secondary)",
   cursor: "pointer",
   fontSize: 14,
   lineHeight: 1,

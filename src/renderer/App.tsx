@@ -69,9 +69,9 @@ export function App(): ReactElement {
         display: "flex",
         flexDirection: "column",
         height: "100vh",
-        background: "#0f0f0f",
-        color: "#e8e8e8",
-        fontFamily: "system-ui, sans-serif",
+        background: "var(--bg-base)",
+        color: "var(--text-primary)",
+        fontFamily: "var(--font-sans)",
       }}
     >
       {showUpdateBanner ? (
@@ -83,10 +83,10 @@ export function App(): ReactElement {
             justifyContent: "space-between",
             gap: 12,
             padding: "10px 14px",
-            borderBottom: "1px solid #2a2a2a",
-            background: "#161616",
+            borderBottom: "1px solid var(--border-subtle)",
+            background: "var(--bg-surface)",
             fontSize: 13,
-            color: "#d0d0d0",
+            color: "var(--text-secondary)",
           }}
         >
           <span style={{ flex: 1, minWidth: 0 }}>
@@ -108,16 +108,8 @@ export function App(): ReactElement {
                 onClick={() => {
                   void ipc.invoke(IPC_CHANNELS.settings.APP_RESTART_TO_UPDATE);
                 }}
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: 6,
-                  border: "1px solid #3584e4",
-                  background: "#1e3a5f",
-                  color: "#e8f2ff",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: 600,
-                }}
+                className="btn-primary"
+                style={{ padding: "6px 12px", fontSize: 12 }}
               >
                 Restart Now
               </button>
@@ -126,16 +118,8 @@ export function App(): ReactElement {
               type="button"
               aria-label="Dismiss update notice"
               onClick={() => setUpdateDismissed(true)}
-              style={{
-                padding: "4px 8px",
-                borderRadius: 6,
-                border: "1px solid #333",
-                background: "transparent",
-                color: "#aaa",
-                cursor: "pointer",
-                fontSize: 16,
-                lineHeight: 1,
-              }}
+              className="btn-secondary"
+              style={{ padding: "3px 10px", fontSize: 16, lineHeight: 1 }}
             >
               ×
             </button>
@@ -145,71 +129,118 @@ export function App(): ReactElement {
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         <aside
           style={{
-            width: 220,
-            borderRight: "1px solid #222",
-            padding: "16px 12px",
+            position: "relative",
+            width: 240,
+            borderRight: "1px solid var(--border-subtle)",
+            background: "var(--bg-sidebar)",
+            padding: 0,
             display: "flex",
             flexDirection: "column",
-            gap: 6,
             flexShrink: 0,
+            minHeight: 0,
           }}
         >
-          <div style={{ fontWeight: 700, marginBottom: 12, letterSpacing: 0.4 }}>Spire</div>
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => {
-                setActive(item.key);
-                if (item.key === "podcasts") {
-                  setPodcastDetail(null);
-                }
-                void ipc.pingDomain(item.key);
-              }}
+          <div
+            style={{
+              padding: "24px 20px 32px 20px",
+              borderBottom: "1px solid var(--border-subtle)",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 12 14" aria-hidden="true">
+              <path d="M6 1L11 13H1L6 1Z" fill="var(--accent)" />
+            </svg>
+            <span
               style={{
-                textAlign: "left",
-                padding: "10px 12px",
-                borderRadius: 8,
-                border: "1px solid transparent",
-                background: active === item.key ? "#1c1c1c" : "transparent",
-                color: "#e8e8e8",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 8,
+                fontSize: 17,
+                fontWeight: 700,
+                letterSpacing: "-0.03em",
+                color: "var(--text-primary)",
               }}
             >
-              <span>{item.label}</span>
-              {item.key === "downloads" && activeDownloadBadge > 0 ? (
-                <span
+              Spire
+            </span>
+          </div>
+          <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8, flex: 1, paddingBottom: 56 }}>
+            {NAV_ITEMS.map((item) => {
+              const isActive = active === item.key;
+              return (
+                <button
+                  key={item.key}
+                  className={`main-nav-item${isActive ? " main-nav-item-active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setActive(item.key);
+                    if (item.key === "podcasts") {
+                      setPodcastDetail(null);
+                    }
+                    void ipc.pingDomain(item.key);
+                  }}
                   style={{
-                    fontSize: 11,
-                    minWidth: 20,
-                    height: 20,
-                    padding: "0 6px",
-                    borderRadius: 999,
-                    background: "#3584e4",
-                    color: "#fff",
-                    display: "inline-flex",
+                    textAlign: "left",
+                    padding: isActive ? "10px 20px 10px 18px" : "10px 20px",
+                    borderRadius: 0,
+                    border: "1px solid transparent",
+                    borderLeft: isActive ? "2px solid var(--accent)" : "2px solid transparent",
+                    background: "transparent",
+                    color: isActive ? "var(--accent)" : "var(--text-secondary)",
+                    cursor: "pointer",
+                    display: "flex",
                     alignItems: "center",
-                    justifyContent: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    fontSize: 13.5,
+                    fontWeight: isActive ? 600 : 450,
                   }}
                 >
-                  {activeDownloadBadge}
-                </span>
-              ) : null}
-            </button>
-          ))}
+                  <span>{item.label}</span>
+                  {item.key === "downloads" && activeDownloadBadge > 0 ? (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        minWidth: 20,
+                        height: 20,
+                        padding: "0 6px",
+                        borderRadius: 999,
+                        background: "var(--accent)",
+                        color: "var(--text-inverse)",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      {activeDownloadBadge}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+          <div
+            style={{
+              position: "absolute",
+              bottom: 0,
+              left: 0,
+              right: 0,
+              padding: "16px 20px",
+              fontSize: 12,
+              color: "var(--text-muted)",
+            }}
+          >
+            v0.1.1
+          </div>
         </aside>
         <main
           style={{
             flex: 1,
             minWidth: 0,
-            padding: 24,
-            paddingRight: 24 + panelPad,
+            padding: "36px 44px",
+            paddingRight: 44 + panelPad,
             overflow: "auto",
             position: "relative",
+            background: "var(--bg-base)",
           }}
         >
           <Outlet
@@ -254,20 +285,18 @@ function Outlet({
   if (active === "downloads") {
     return (
       <div>
-        <h1 style={{ marginTop: 0, fontSize: 22 }}>Downloads</h1>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 28, gap: 16 }}>
+          <h1 className="page-title">Downloads</h1>
+        </div>
         <DownloadQueue
           downloads={downloadsApi.downloads}
           isLoading={downloadsApi.isLoading}
-          addMagnet={downloadsApi.addMagnet}
-          addTorrentFile={downloadsApi.addTorrentFile}
           addUrl={downloadsApi.addUrl}
           onOpenPodcasts={onNavigatePodcasts}
-          pause={downloadsApi.pause}
-          resume={downloadsApi.resume}
           cancel={downloadsApi.cancel}
           retry={downloadsApi.retry}
         />
-        <div style={{ borderTop: "1px solid #222", margin: "24px 0" }} />
+        <div style={{ borderTop: "1px solid var(--border-subtle)", margin: "24px 0" }} />
         <DownloadHistory switchToLibrary={onSwitchToLibrary} />
       </div>
     );
@@ -286,7 +315,9 @@ function Outlet({
     }
     return (
       <div>
-        <h1 style={{ marginTop: 0, fontSize: 22 }}>Podcasts</h1>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 28, gap: 16 }}>
+          <h1 className="page-title">Podcasts</h1>
+        </div>
         <FeedList
           fetchFeed={downloadsApi.fetchFeed}
           getSavedFeeds={downloadsApi.getSavedFeeds}

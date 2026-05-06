@@ -4,12 +4,11 @@ import {
   useCallback,
   useContext,
   useEffect,
-  useLayoutEffect,
   useRef,
+  useState,
   type ReactElement,
   type ReactNode,
 } from "react";
-import { Howl } from "howler";
 import { IPC_CHANNELS } from "@shared/ipc-channels";
 import type {
   BookDetailPayload,
@@ -22,23 +21,11 @@ import type {
   ShortcutMap,
 } from "@shared/library-types";
 import { useIPC } from "./useIPC.js";
-import { pathToFileUrlHref } from "../utils/pathToFileUrl.js";
+import { useAudioElement } from "./useAudioElement.js";
 import { usePlayerStore } from "../store/playerStore.js";
 import { acceleratorMatchesKeyboard } from "../utils/appShortcuts.js";
-import {
-  rebuildHtml5EqChain,
-  setupHtml5AudioGraph,
-  teardownHtml5AudioGraph,
-  type Html5AudioGraph,
-} from "../utils/html5Audio.js";
 
 const PROGRESS_DEBOUNCE_MS = 5000;
-const POSITION_TICK_MS = 500;
-
-const SILENCE_RMS_THRESHOLD = 0.015;
-const SILENCE_DURATION_MS = 1500;
-const SKIP_SILENCE_SEEK_SEC = 1;
-const FILE_START_GRACE_SEC = 3;
 
 export const SPEED_CYCLE_SEQUENCE = [1, 1.25, 1.5, 1.75, 2, 2.5, 3, 0.75, 0.5] as const;
 
@@ -72,13 +59,8 @@ function sortChapters(chapters: Chapter[], files: BookFileItem[]): Chapter[] {
   });
 }
 
-function chapterEndSeconds(
-  ch: Chapter,
-  sortedChapters: Chapter[],
-  chGlobalIndex: number,
-  fileDuration: number,
-): number {
-  const nextSameFile = sortedChapters.slice(chGlobalIndex + 1).find((c) => c.file_id === ch.file_id);
+function chapterEndSeconds(ch: Chapter, sortedChapters: Chapter[], chapterIndex: number, fileDuration: number): number {
+  const nextSameFile = sortedChapters.slice(chapterIndex + 1).find((c) => c.file_id === ch.file_id);
   if (nextSameFile?.start_time != null) {
     return nextSameFile.start_time;
   }
@@ -115,13 +97,6 @@ function findCurrentChapterIndex(
   return best;
 }
 
-function formatsFromPath(filePath: string): string[] {
-  const base = filePath.split(/[/\\]/).pop() ?? "";
-  const dot = base.lastIndexOf(".");
-  const ext = dot >= 0 ? base.slice(dot + 1).toLowerCase() : "";
-  return ext ? [ext] : [];
-}
-
 function toBookListItem(detail: BookDetailPayload): BookListItem {
   const { book, progress_percent } = detail;
   const prog = detail.progress;
@@ -144,15 +119,31 @@ function toBookListItem(detail: BookDetailPayload): BookListItem {
   };
 }
 
-function usePlayerCore(): {
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+type UsePlayerCoreApi = {
+  currentBook: BookListItem | null;
+  currentFile: BookFileItem | null;
+  isPlaying: boolean;
+  position: number;
+  duration: number;
+  speed: number;
+  error: MediaError | null;
   loadBook: (bookId: number) => Promise<void>;
-  play: () => void;
+  play: (book?: BookListItem, fileIndex?: number, startPosition?: number) => Promise<void>;
   pause: () => void;
+  resume: () => void;
   togglePlay: () => void;
   seekTo: (seconds: number) => void;
+  seek: (seconds: number) => void;
   seekToChapter: (chapter: Chapter) => void;
+  skipToChapter: (chapter: Chapter) => void;
   seekToBookmark: (bookmark: Bookmark) => Promise<void>;
   seekBy: (deltaSeconds: number) => void;
+  skipForward: (seconds?: number) => void;
+  skipBack: (seconds?: number) => void;
   nextFile: () => void;
   prevFile: () => void;
   nextChapter: () => void;
@@ -165,73 +156,41 @@ function usePlayerCore(): {
   clearSleepTimer: () => void;
   toggleSkipSilence: () => Promise<void>;
   setEqPresetAndPersist: (preset: EqPreset) => Promise<void>;
-} {
-  const eqPreset = usePlayerStore((s) => s.eqPreset);
+};
+
+function usePlayerCore(): UsePlayerCoreApi {
   const { invoke, subscribe } = useIPC();
-  const howlRef = useRef<Howl | null>(null);
-  const html5GraphRef = useRef<Html5AudioGraph | null>(null);
-  const sortedFilesRef = useRef<BookFileItem[]>([]);
-  const sortedChaptersRef = useRef<Chapter[]>([]);
-  const positionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastProgressFlushRef = useRef<number>(Date.now());
-  const playAfterLoadRef = useRef(false);
-  const mountHowlRef = useRef<(fileIndex: number, seekSeconds: number, rate: number, autoplay: boolean) => void>(() => {});
-  const silenceStartMsRef = useRef<number | null>(null);
-  const byteScratchRef = useRef<Uint8Array | null>(null);
-  const shortcutsRef = useRef<ShortcutMap | null>(null);
-  const seekByRef = useRef<(n: number) => void>((n) => {
-    void n;
-  });
+  const audio = useAudioElement();
+  const [mediaError, setMediaError] = useState<MediaError | null>(null);
 
-  const clearPositionInterval = useCallback(() => {
-    if (positionIntervalRef.current != null) {
-      clearInterval(positionIntervalRef.current);
-      positionIntervalRef.current = null;
-    }
-  }, []);
-
-  const stopHowl = useCallback(() => {
-    teardownHtml5AudioGraph(html5GraphRef.current);
-    html5GraphRef.current = null;
-    silenceStartMsRef.current = null;
-    const h = howlRef.current;
-    if (h) {
-      h.stop();
-      h.unload();
-      howlRef.current = null;
-    }
-  }, []);
-
-  const flushProgress = useCallback(
-    async (force: boolean) => {
-      const store = usePlayerStore.getState();
-      const book = store.currentBook;
-      const fileId = store.currentFileId;
-      if (!book) {
-        return;
-      }
-      const now = Date.now();
-      if (!force && now - lastProgressFlushRef.current < PROGRESS_DEBOUNCE_MS) {
-        return;
-      }
-      lastProgressFlushRef.current = now;
-      const howl = howlRef.current;
-      let pos = store.position;
-      if (howl) {
-        const s = howl.seek() as number;
-        if (typeof s === "number" && Number.isFinite(s)) {
-          pos = s;
-        }
-      }
-      await invoke(IPC_CHANNELS.playback.SAVE_PROGRESS, {
-        book_id: book.id,
-        current_file_id: fileId,
-        position_seconds: pos,
-        playback_speed: store.speed,
-      });
+  const logMediaDebug = useCallback(
+    (event: string, extra: Record<string, unknown> = {}) => {
+      void invoke(IPC_CHANNELS.playback.MEDIA_DEBUG_LOG, {
+        source: "usePlayer",
+        event,
+        ...extra,
+      }).catch(() => {});
     },
     [invoke],
   );
+
+  const currentBook = usePlayerStore((s) => s.currentBook);
+  const isPlaying = usePlayerStore((s) => s.isPlaying);
+  const position = usePlayerStore((s) => s.position);
+  const duration = usePlayerStore((s) => s.duration);
+  const speed = usePlayerStore((s) => s.speed);
+  const currentFileIndex = usePlayerStore((s) => s.currentFileIndex);
+  const files = usePlayerStore((s) => s.files);
+
+  const currentFile = files[currentFileIndex] ?? null;
+
+  const sortedFilesRef = useRef<BookFileItem[]>([]);
+  const sortedChaptersRef = useRef<Chapter[]>([]);
+  const pendingSeekRef = useRef<number | null>(null);
+  const playAfterCanPlayRef = useRef(false);
+  const pendingMountRef = useRef(0);
+  const lastProgressFlushRef = useRef(0);
+  const shortcutsRef = useRef<ShortcutMap | null>(null);
 
   const reportPlaybackState = useCallback(async () => {
     const st = usePlayerStore.getState();
@@ -247,176 +206,335 @@ function usePlayerCore(): {
     try {
       await invoke(IPC_CHANNELS.playback.REPORT_STATE, payload);
     } catch {
-      /* ignore */
+      // no-op
     }
   }, [invoke]);
 
-  const startPositionTick = useCallback(() => {
-    clearPositionInterval();
-    positionIntervalRef.current = setInterval(() => {
-      const howl = howlRef.current;
-      const store = usePlayerStore.getState();
-      if (!howl || !howl.playing()) {
+  const flushProgress = useCallback(
+    async (force: boolean) => {
+      const st = usePlayerStore.getState();
+      const book = st.currentBook;
+      if (!book) {
         return;
       }
-      const raw = howl.seek() as number;
-      const pos = typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
-      const durRaw = howl.duration();
-      const dur = typeof durRaw === "number" && durRaw > 0 ? durRaw : store.duration;
-      store.setPosition(pos);
-      if (dur > 0) {
-        store.setDuration(dur);
-      }
-      const chIdx = findCurrentChapterIndex(sortedChaptersRef.current, store.currentFileId, pos, dur);
-      store.setCurrentChapterIndex(chIdx);
-
-      void flushProgress(false);
-      void reportPlaybackState();
-
-      const graph = html5GraphRef.current;
-      if (graph && store.skipSilenceEnabled && pos >= FILE_START_GRACE_SEC) {
-        const n = graph.analyser.frequencyBinCount;
-        if (!byteScratchRef.current || byteScratchRef.current.length !== n) {
-          byteScratchRef.current = new Uint8Array(new ArrayBuffer(n));
-        }
-        const buf = byteScratchRef.current;
-        graph.analyser.getByteTimeDomainData(buf as Uint8Array<ArrayBuffer>);
-        let sum = 0;
-        for (let i = 0; i < buf.length; i++) {
-          const v = (buf[i]! - 128) / 128;
-          sum += v * v;
-        }
-        const rms = Math.sqrt(sum / buf.length);
-        if (rms < SILENCE_RMS_THRESHOLD) {
-          if (silenceStartMsRef.current == null) {
-            silenceStartMsRef.current = Date.now();
-          } else if (Date.now() - silenceStartMsRef.current >= SILENCE_DURATION_MS) {
-            const maxT = dur > 0 ? dur : pos + SKIP_SILENCE_SEEK_SEC;
-            const target = Math.min(pos + SKIP_SILENCE_SEEK_SEC, maxT);
-            seekByRef.current(target - pos);
-            silenceStartMsRef.current = null;
-          }
-        } else {
-          silenceStartMsRef.current = null;
-        }
-      } else {
-        silenceStartMsRef.current = null;
-      }
-
-      const sleep = store.sleepTimer;
-      if (sleep?.mode === "minutes" && sleep.endsAt != null && Date.now() >= sleep.endsAt) {
-        howl.pause();
-        store.setIsPlaying(false);
-        store.setSleepTimer(null);
-        void flushProgress(true);
-        clearPositionInterval();
+      const now = Date.now();
+      if (!force && now - lastProgressFlushRef.current < PROGRESS_DEBOUNCE_MS) {
         return;
       }
+      lastProgressFlushRef.current = now;
+      await invoke(IPC_CHANNELS.playback.SAVE_PROGRESS, {
+        book_id: book.id,
+        current_file_id: st.currentFileId,
+        position_seconds: audio.getCurrentTime(),
+        playback_speed: st.speed,
+      });
+    },
+    [audio, invoke],
+  );
 
-      if (sleep?.mode === "end-of-chapter" && chIdx >= 0) {
-        const ch = sortedChaptersRef.current[chIdx];
-        if (ch) {
-          const end = chapterEndSeconds(ch, sortedChaptersRef.current, chIdx, dur);
-          if (Number.isFinite(end) && pos >= end - 0.05) {
-            howl.pause();
-            store.setIsPlaying(false);
-            store.setSleepTimer(null);
-            void flushProgress(true);
-            clearPositionInterval();
-          }
-        }
-      }
+  const audioRef = useRef(audio);
+  const flushProgressRef = useRef(flushProgress);
 
-      if (sleep?.mode === "end-of-book") {
-        const lastIx = sortedFilesRef.current.length - 1;
-        const isLast = store.currentFileIndex >= lastIx && lastIx >= 0 && dur > 0 && pos >= dur - 0.25;
-        if (isLast) {
-          howl.pause();
-          store.setIsPlaying(false);
-          store.setSleepTimer(null);
-          void flushProgress(true);
-          clearPositionInterval();
-        }
-      }
-    }, POSITION_TICK_MS);
-  }, [clearPositionInterval, flushProgress, reportPlaybackState]);
-
-  const mountHowl = useCallback(
-    (fileIndex: number, seekSeconds: number, rate: number, autoplay: boolean) => {
-      stopHowl();
-      clearPositionInterval();
-      const files = sortedFilesRef.current;
-      const file = files[fileIndex];
+  const mountFile = useCallback(
+    async (fileIndex: number, seekSeconds: number, autoplay: boolean) => {
+      const filesList = sortedFilesRef.current;
+      const file = filesList[fileIndex];
       if (!file) {
         return;
       }
-      const src = pathToFileUrlHref(file.file_path);
-      const howl = new Howl({
-        src: [src],
-        html5: true,
-        format: formatsFromPath(file.file_path),
-      });
-      howlRef.current = howl;
+      const generation = ++pendingMountRef.current;
       usePlayerStore.getState().setCurrentFileIndex(fileIndex, file.id);
+      usePlayerStore.getState().setPlaybackError(null);
 
-      howl.once("load", () => {
-        const d = howl.duration();
-        const dur = typeof d === "number" && d > 0 ? d : 0;
-        if (dur > 0) {
-          usePlayerStore.getState().setDuration(dur);
-        }
-        const maxSeek = dur > 0 ? dur : seekSeconds;
-        const clamped = Math.max(0, Math.min(seekSeconds, maxSeek > 0 ? maxSeek : seekSeconds));
-        howl.seek(clamped);
-        usePlayerStore.getState().setPosition(clamped);
-        howl.rate(rate);
-        const chIdx = findCurrentChapterIndex(sortedChaptersRef.current, file.id, clamped, dur);
-        usePlayerStore.getState().setCurrentChapterIndex(chIdx);
-
-        teardownHtml5AudioGraph(html5GraphRef.current);
-        html5GraphRef.current = null;
-        const graph = setupHtml5AudioGraph(howl, usePlayerStore.getState().eqPreset);
-        html5GraphRef.current = graph;
-
-        const wantPlay = autoplay || playAfterLoadRef.current;
-        playAfterLoadRef.current = false;
-        if (wantPlay) {
-          howl.play();
-          usePlayerStore.getState().setIsPlaying(true);
-          startPositionTick();
-        }
-        void reportPlaybackState();
-      });
-
-      howl.on("loaderror", (_id: unknown, err: unknown) => {
-        console.warn("[spire] Howl loaderror:", file.file_path, err);
-      });
-
-      howl.on("end", () => {
-        clearPositionInterval();
-        void flushProgress(true);
-        const st = usePlayerStore.getState();
-        const endedIndex = fileIndex;
-        const last = sortedFilesRef.current.length - 1;
-        if (endedIndex < last) {
-          const speed = st.speed;
-          usePlayerStore.getState().nextFile();
-          mountHowlRef.current(endedIndex + 1, 0, speed, true);
+      try {
+        logMediaDebug("mountFile.resolve_start", {
+          fileIndex,
+          fileId: file.id,
+          filePath: file.file_path,
+          seekSeconds,
+          autoplay,
+          generation,
+        });
+        pendingSeekRef.current = null;
+        playAfterCanPlayRef.current = autoplay;
+        audio.setSpeed(usePlayerStore.getState().speed);
+        logMediaDebug("mountFile.before_mpv_load", { filePath: file.file_path, generation });
+        await audio.load(file.file_path, Math.max(0, seekSeconds));
+        if (generation !== pendingMountRef.current) {
+          logMediaDebug("mountFile.stale_generation_after_load", { generation, pending: pendingMountRef.current });
           return;
         }
-        void invoke(IPC_CHANNELS.playback.MARK_COMPLETE, st.currentBook?.id);
-        st.setSleepTimer(null);
-        st.setIsPlaying(false);
-        void reportPlaybackState();
-        stopHowl();
-      });
+        logMediaDebug("mountFile.after_mpv_load", { filePath: file.file_path, generation });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logMediaDebug("mountFile.error", {
+          severity: "error",
+          message,
+          stack: error instanceof Error ? error.stack : null,
+          fileIndex,
+          filePath: file.file_path,
+          generation,
+        });
+        usePlayerStore.getState().setPlaybackError(message);
+      }
     },
-    [clearPositionInterval, flushProgress, invoke, reportPlaybackState, startPositionTick, stopHowl],
+    [audio, logMediaDebug],
   );
 
-  useLayoutEffect(() => {
-    mountHowlRef.current = mountHowl;
-  }, [mountHowl]);
+  const seekTo = useCallback(
+    (seconds: number) => {
+      const st = usePlayerStore.getState();
+      const maxSeek = st.duration > 0 ? st.duration : Math.max(0, seconds);
+      const clamped = clamp(seconds, 0, maxSeek > 0 ? maxSeek : Number.MAX_SAFE_INTEGER);
+      audio.seek(clamped);
+      st.setPosition(clamped);
+      const chapterIndex = findCurrentChapterIndex(sortedChaptersRef.current, st.currentFileId, clamped, st.duration);
+      st.setCurrentChapterIndex(chapterIndex);
+      void flushProgress(true);
+      void reportPlaybackState();
+    },
+    [audio, flushProgress, reportPlaybackState],
+  );
+
+  const seekBy = useCallback(
+    (deltaSeconds: number) => {
+      seekTo(audio.getCurrentTime() + deltaSeconds);
+    },
+    [audio, seekTo],
+  );
+
+  const setSpeed = useCallback(
+    (rate: number) => {
+      const clamped = clamp(rate, 0.5, 3.5);
+      usePlayerStore.getState().setSpeed(clamped);
+      audio.setSpeed(clamped);
+      void flushProgress(true);
+    },
+    [audio, flushProgress],
+  );
+
+  const setSleepTimer = useCallback((config: { mode: "minutes" | "end-of-chapter" | "end-of-book"; minutes?: number }) => {
+    if (config.mode === "minutes") {
+      const minutes = config.minutes ?? 1;
+      usePlayerStore.getState().setSleepTimer({
+        mode: "minutes",
+        minutes,
+        endsAt: Date.now() + minutes * 60_000,
+      });
+      return;
+    }
+    usePlayerStore.getState().setSleepTimer({ mode: config.mode });
+  }, []);
+
+  const clearSleepTimer = useCallback(() => {
+    usePlayerStore.getState().setSleepTimer(null);
+  }, []);
+
+  const loadBook = useCallback(
+    async (bookId: number) => {
+      await flushProgress(true);
+      audio.pause();
+      const detail = await invoke<BookDetailPayload | null>(IPC_CHANNELS.library.GET_BOOK, bookId);
+      if (!detail) {
+        return;
+      }
+      const bookmarks = await invoke<Bookmark[]>(IPC_CHANNELS.playback.GET_BOOKMARKS, bookId);
+      const sortedFiles = sortFiles(detail.files);
+      const sortedChapters = sortChapters(detail.chapters, sortedFiles);
+      sortedFilesRef.current = sortedFiles;
+      sortedChaptersRef.current = sortedChapters;
+
+      let fileIndex = 0;
+      if (detail.progress?.current_file_id) {
+        const ix = sortedFiles.findIndex((f) => f.id === detail.progress?.current_file_id);
+        if (ix >= 0) {
+          fileIndex = ix;
+        }
+      }
+      const current = sortedFiles[fileIndex];
+      const initialSeek =
+        detail.progress && current && detail.progress.current_file_id === current.id
+          ? detail.progress.position_seconds ?? 0
+          : 0;
+      const initialSpeed = clamp(detail.progress?.playback_speed ?? 1, 0.5, 3.5);
+
+      usePlayerStore
+        .getState()
+        .setBook(toBookListItem(detail), sortedFiles, sortedChapters, fileIndex, initialSeek, initialSpeed);
+      usePlayerStore.getState().setBookmarks(bookmarks);
+      usePlayerStore.getState().setPlaybackError(null);
+      setMediaError(null);
+
+      if (sortedFiles.length > 1) {
+        try {
+          await audio.loadPlaylist(
+            sortedFiles.map((f) => f.file_path),
+            fileIndex,
+            initialSeek,
+          );
+          usePlayerStore.getState().setCurrentFileIndex(fileIndex, sortedFiles[fileIndex]?.id ?? null);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          usePlayerStore.getState().setPlaybackError(message);
+        }
+      } else {
+        await mountFile(fileIndex, initialSeek, false);
+      }
+      void reportPlaybackState();
+    },
+    [audio, flushProgress, invoke, mountFile, reportPlaybackState],
+  );
+
+  const play = useCallback(
+    async (book?: BookListItem, fileIndex = 0, startPosition = 0) => {
+      if (book) {
+        await loadBook(book.id);
+        const ix = clamp(fileIndex, 0, Math.max(0, sortedFilesRef.current.length - 1));
+        await mountFile(ix, Math.max(0, startPosition), true);
+        return;
+      }
+      if (!audio.hasMediaLoaded()) {
+        playAfterCanPlayRef.current = true;
+        return;
+      }
+      try {
+        await audio.play();
+        usePlayerStore.getState().setIsPlaying(true);
+        void reportPlaybackState();
+      } catch (err) {
+        logMediaDebug("usePlayer.play_failed", {
+          severity: "error",
+          message: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : null,
+          hasMediaLoaded: audio.hasMediaLoaded(),
+          note: "mpv IPC play failed",
+        });
+        usePlayerStore.getState().setIsPlaying(false);
+      }
+    },
+    [audio, loadBook, logMediaDebug, mountFile, reportPlaybackState],
+  );
+
+  const pause = useCallback(() => {
+    audio.pause();
+    usePlayerStore.getState().setIsPlaying(false);
+    void flushProgress(true);
+    void reportPlaybackState();
+  }, [audio, flushProgress, reportPlaybackState]);
+
+  const resume = useCallback(() => {
+    void play();
+  }, [play]);
+
+  const togglePlay = useCallback(() => {
+    if (audio.isPaused()) {
+      void play();
+      return;
+    }
+    pause();
+  }, [audio, pause, play]);
+
+  const seekToChapter = useCallback(
+    (chapter: Chapter) => {
+      const index = sortedFilesRef.current.findIndex((f) => f.id === chapter.file_id);
+      if (index < 0) {
+        return;
+      }
+      const start = chapter.start_time ?? 0;
+      const st = usePlayerStore.getState();
+      if (index !== st.currentFileIndex) {
+        void flushProgress(true);
+        void mountFile(index, start, st.isPlaying);
+        return;
+      }
+      seekTo(start);
+    },
+    [flushProgress, mountFile, seekTo],
+  );
+
+  const seekToBookmark = useCallback(
+    async (bookmark: Bookmark) => {
+      if (bookmark.file_id == null) {
+        seekTo(bookmark.position_seconds ?? 0);
+        return;
+      }
+      const index = sortedFilesRef.current.findIndex((f) => f.id === bookmark.file_id);
+      if (index < 0) {
+        seekTo(bookmark.position_seconds ?? 0);
+        return;
+      }
+      const st = usePlayerStore.getState();
+      if (index !== st.currentFileIndex) {
+        await mountFile(index, bookmark.position_seconds ?? 0, st.isPlaying);
+      } else {
+        seekTo(bookmark.position_seconds ?? 0);
+      }
+    },
+    [mountFile, seekTo],
+  );
+
+  const nextFile = useCallback(() => {
+    const st = usePlayerStore.getState();
+    const next = st.currentFileIndex + 1;
+    if (next >= sortedFilesRef.current.length) {
+      return;
+    }
+    void flushProgress(true);
+    void mountFile(next, 0, st.isPlaying);
+  }, [flushProgress, mountFile]);
+
+  const prevFile = useCallback(() => {
+    const st = usePlayerStore.getState();
+    const prev = st.currentFileIndex - 1;
+    if (prev < 0) {
+      return;
+    }
+    void flushProgress(true);
+    void mountFile(prev, 0, st.isPlaying);
+  }, [flushProgress, mountFile]);
+
+  const nextChapter = useCallback(() => {
+    const st = usePlayerStore.getState();
+    const list = sortedChaptersRef.current;
+    if (list.length === 0) {
+      return;
+    }
+    const current = st.currentChapterIndex;
+    if (current < 0) {
+      const first = list[0];
+      if (first) {
+        seekToChapter(first);
+      }
+      return;
+    }
+    const next = list[current + 1];
+    if (next) {
+      seekToChapter(next);
+    }
+  }, [seekToChapter]);
+
+  const prevChapter = useCallback(() => {
+    const st = usePlayerStore.getState();
+    const list = sortedChaptersRef.current;
+    if (list.length === 0) {
+      return;
+    }
+    const current = st.currentChapterIndex;
+    if (current <= 0) {
+      return;
+    }
+    const prev = list[current - 1];
+    if (prev) {
+      seekToChapter(prev);
+    }
+  }, [seekToChapter]);
+
+  const cycleSpeed = useCallback(() => {
+    const current = usePlayerStore.getState().speed;
+    const idx = SPEED_CYCLE_SEQUENCE.findIndex((item) => Math.abs(item - current) < 0.02);
+    const next = SPEED_CYCLE_SEQUENCE[(idx >= 0 ? idx + 1 : 0) % SPEED_CYCLE_SEQUENCE.length]!;
+    setSpeed(next);
+  }, [setSpeed]);
 
   const refreshBookmarks = useCallback(
     async (bookId: number) => {
@@ -426,263 +544,24 @@ function usePlayerCore(): {
     [invoke],
   );
 
-  const loadBook = useCallback(
-    async (bookId: number) => {
-      clearPositionInterval();
-      await flushProgress(true);
-      stopHowl();
-      usePlayerStore.getState().setIsPlaying(false);
-      const detail = await invoke<BookDetailPayload | null>(IPC_CHANNELS.library.GET_BOOK, bookId);
-      if (!detail) {
-        return;
-      }
-      const bookmarks = await invoke<Bookmark[]>(IPC_CHANNELS.playback.GET_BOOKMARKS, bookId);
-      const sorted = sortFiles(detail.files);
-      const chapters = sortChapters(detail.chapters, sorted);
-      sortedFilesRef.current = sorted;
-      sortedChaptersRef.current = chapters;
-
-      let fileIndex = 0;
-      const prog = detail.progress;
-      if (prog?.current_file_id) {
-        const ix = sorted.findIndex((f) => f.id === prog.current_file_id);
-        if (ix >= 0) {
-          fileIndex = ix;
-        }
-      }
-      const file = sorted[fileIndex];
-      let initialSeek = 0;
-      if (prog && file && prog.current_file_id === file.id) {
-        initialSeek = prog.position_seconds ?? 0;
-      }
-      const speed = Math.min(3.5, Math.max(0.5, prog?.playback_speed ?? 1));
-      const bookItem = toBookListItem(detail);
-      usePlayerStore.getState().setBook(bookItem, sorted, chapters, fileIndex, initialSeek, speed);
-      usePlayerStore.getState().setBookmarks(bookmarks);
-      playAfterLoadRef.current = false;
-      mountHowl(fileIndex, initialSeek, speed, false);
-      void reportPlaybackState();
-    },
-    [clearPositionInterval, flushProgress, invoke, mountHowl, reportPlaybackState, stopHowl],
-  );
-
-  const play = useCallback(() => {
-    const howl = howlRef.current;
-    if (!howl) {
-      playAfterLoadRef.current = true;
-      return;
-    }
-    howl.play();
-    usePlayerStore.getState().setIsPlaying(true);
-    startPositionTick();
-    void reportPlaybackState();
-  }, [reportPlaybackState, startPositionTick]);
-
-  const pause = useCallback(() => {
-    const howl = howlRef.current;
-    if (howl) {
-      howl.pause();
-    }
-    clearPositionInterval();
-    usePlayerStore.getState().setIsPlaying(false);
-    void flushProgress(true);
-    void reportPlaybackState();
-  }, [clearPositionInterval, flushProgress, reportPlaybackState]);
-
-  const togglePlay = useCallback(() => {
-    const howl = howlRef.current;
-    if (howl?.playing()) {
-      pause();
-    } else {
-      play();
-    }
-  }, [pause, play]);
-
-  const seekTo = useCallback(
-    (seconds: number) => {
-      const howl = howlRef.current;
-      const store = usePlayerStore.getState();
-      const dur = howl?.duration() || store.duration;
-      const max = typeof dur === "number" && dur > 0 ? dur : seconds + 1;
-      const clamped = Math.max(0, Math.min(seconds, max));
-      if (howl) {
-        howl.seek(clamped);
-      }
-      store.setPosition(clamped);
-      const chIdx = findCurrentChapterIndex(
-        sortedChaptersRef.current,
-        store.currentFileId,
-        clamped,
-        typeof dur === "number" && dur > 0 ? dur : store.duration,
-      );
-      store.setCurrentChapterIndex(chIdx);
-      void flushProgress(true);
-      void reportPlaybackState();
-    },
-    [flushProgress, reportPlaybackState],
-  );
-
-  const seekBy = useCallback(
-    (deltaSeconds: number) => {
-      const howl = howlRef.current;
-      const store = usePlayerStore.getState();
-      const cur = (howl ? (howl.seek() as number) : store.position) || 0;
-      seekTo(cur + deltaSeconds);
-    },
-    [seekTo],
-  );
-
-  useLayoutEffect(() => {
-    seekByRef.current = seekBy;
-  }, [seekBy]);
-
-  const seekToChapter = useCallback(
-    (chapter: Chapter) => {
-      const files = sortedFilesRef.current;
-      const ix = files.findIndex((f) => f.id === chapter.file_id);
-      if (ix < 0) {
-        return;
-      }
-      const store = usePlayerStore.getState();
-      const wasPlaying = store.isPlaying;
-      const speed = store.speed;
-      const start = chapter.start_time ?? 0;
-      if (ix !== store.currentFileIndex) {
-        void flushProgress(true);
-        mountHowlRef.current(ix, start, speed, wasPlaying);
-      } else {
-        seekTo(start);
-      }
-    },
-    [flushProgress, seekTo],
-  );
-
-  const nextFile = useCallback(() => {
-    const store = usePlayerStore.getState();
-    const i = store.currentFileIndex;
-    if (i >= sortedFilesRef.current.length - 1) {
-      return;
-    }
-    void flushProgress(true);
-    const playing = store.isPlaying;
-    const speed = store.speed;
-    store.nextFile();
-    mountHowlRef.current(i + 1, 0, speed, playing);
-  }, [flushProgress]);
-
-  const prevFile = useCallback(() => {
-    const store = usePlayerStore.getState();
-    const i = store.currentFileIndex;
-    if (i <= 0) {
-      return;
-    }
-    void flushProgress(true);
-    const playing = store.isPlaying;
-    const speed = store.speed;
-    store.prevFile();
-    mountHowlRef.current(i - 1, 0, speed, playing);
-  }, [flushProgress]);
-
-  const nextChapter = useCallback(() => {
-    const store = usePlayerStore.getState();
-    const list = sortedChaptersRef.current;
-    if (list.length === 0) {
-      return;
-    }
-    const cur = store.currentChapterIndex;
-    if (cur < 0) {
-      const first = list[0];
-      if (first) {
-        seekToChapter(first);
-      }
-      return;
-    }
-    const next = list[cur + 1];
-    if (next) {
-      seekToChapter(next);
-    }
-  }, [seekToChapter]);
-
-  const prevChapter = useCallback(() => {
-    const store = usePlayerStore.getState();
-    const list = sortedChaptersRef.current;
-    if (list.length === 0) {
-      return;
-    }
-    const cur = store.currentChapterIndex;
-    if (cur <= 0) {
-      return;
-    }
-    const target = list[cur - 1];
-    if (target) {
-      seekToChapter(target);
-    }
-  }, [seekToChapter]);
-
-  const seekToBookmark = useCallback(
-    async (bookmark: Bookmark) => {
-      if (bookmark.file_id == null) {
-        seekTo(bookmark.position_seconds ?? 0);
-        return;
-      }
-      const files = sortedFilesRef.current;
-      const ix = files.findIndex((f) => f.id === bookmark.file_id);
-      if (ix < 0) {
-        seekTo(bookmark.position_seconds ?? 0);
-        return;
-      }
-      const store = usePlayerStore.getState();
-      const wasPlaying = store.isPlaying;
-      const speed = store.speed;
-      const pos = bookmark.position_seconds ?? 0;
-      if (ix !== store.currentFileIndex) {
-        void flushProgress(true);
-        mountHowlRef.current(ix, pos, speed, wasPlaying);
-      } else {
-        seekTo(pos);
-      }
-    },
-    [flushProgress, seekTo],
-  );
-
-  const setSpeed = useCallback(
-    (rate: number) => {
-      const clamped = Math.min(3.5, Math.max(0.5, rate));
-      howlRef.current?.rate(clamped);
-      usePlayerStore.getState().setSpeed(clamped);
-      void flushProgress(true);
-    },
-    [flushProgress],
-  );
-
-  const cycleSpeed = useCallback(() => {
-    const cur = usePlayerStore.getState().speed;
-    const idx = SPEED_CYCLE_SEQUENCE.findIndex((s) => Math.abs(s - cur) < 0.02);
-    const next = SPEED_CYCLE_SEQUENCE[(idx >= 0 ? idx + 1 : 0) % SPEED_CYCLE_SEQUENCE.length]!;
-    setSpeed(next);
-  }, [setSpeed]);
-
   const addBookmark = useCallback(
     async (note?: string) => {
-      const store = usePlayerStore.getState();
-      const book = store.currentBook;
-      const fid = store.currentFileId;
-      if (!book || fid == null) {
+      const st = usePlayerStore.getState();
+      const book = st.currentBook;
+      const fileId = st.currentFileId;
+      if (!book || fileId == null) {
         return;
       }
-      const howl = howlRef.current;
-      const raw = howl ? (howl.seek() as number) : store.position;
-      const pos = typeof raw === "number" && Number.isFinite(raw) ? raw : store.position;
       await invoke(IPC_CHANNELS.playback.ADD_BOOKMARK, {
         book_id: book.id,
-        file_id: fid,
-        position_seconds: pos,
+        file_id: fileId,
+        position_seconds: audio.getCurrentTime(),
         note: note ?? null,
       });
       await refreshBookmarks(book.id);
-      void flushProgress(true);
+      await flushProgress(true);
     },
-    [flushProgress, invoke, refreshBookmarks],
+    [audio, flushProgress, invoke, refreshBookmarks],
   );
 
   const deleteBookmark = useCallback(
@@ -696,118 +575,203 @@ function usePlayerCore(): {
     [invoke, refreshBookmarks],
   );
 
-  const setSleepTimer = useCallback((config: { mode: "minutes" | "end-of-chapter" | "end-of-book"; minutes?: number }) => {
-    if (config.mode === "minutes") {
-      const m = config.minutes ?? 1;
-      const endsAt = Date.now() + m * 60_000;
-      usePlayerStore.getState().setSleepTimer({ mode: "minutes", minutes: m, endsAt });
-      return;
-    }
-    usePlayerStore.getState().setSleepTimer({ mode: config.mode });
-  }, []);
-
-  const clearSleepTimer = useCallback(() => {
-    usePlayerStore.getState().setSleepTimer(null);
-  }, []);
-
   const toggleSkipSilence = useCallback(async () => {
     usePlayerStore.getState().toggleSkipSilence();
-    const next = usePlayerStore.getState().skipSilenceEnabled;
-    await invoke(IPC_CHANNELS.settings.SAVE_SKIP_SILENCE, next);
-    void reportPlaybackState();
-  }, [invoke, reportPlaybackState]);
+    const enabled = usePlayerStore.getState().skipSilenceEnabled;
+    await invoke(IPC_CHANNELS.settings.SAVE_SKIP_SILENCE, enabled);
+    audio.setSkipSilence(enabled);
+  }, [audio, invoke]);
 
   const setEqPresetAndPersist = useCallback(
     async (preset: EqPreset) => {
       usePlayerStore.getState().setEqPreset(preset);
-      const g = html5GraphRef.current;
-      if (g) {
-        rebuildHtml5EqChain(g, preset);
-      }
       await invoke(IPC_CHANNELS.settings.SET_EQ_PRESET, preset);
-      void reportPlaybackState();
     },
-    [invoke, reportPlaybackState],
+    [invoke],
   );
 
   useEffect(() => {
+    const offCanPlay = audio.on("canplay", () => {
+      const st = usePlayerStore.getState();
+      const seekTarget = pendingSeekRef.current;
+      if (seekTarget != null) {
+        audio.seek(seekTarget);
+        st.setPosition(seekTarget);
+        pendingSeekRef.current = null;
+      }
+      audio.setSpeed(st.speed);
+      if (playAfterCanPlayRef.current) {
+        playAfterCanPlayRef.current = false;
+        void play();
+      }
+    });
+
+    const offLoadedMetadata = audio.on("loadedmetadata", () => {
+      const st = usePlayerStore.getState();
+      const total = audio.getDuration();
+      st.setDuration(total);
+      const chapterIndex = findCurrentChapterIndex(
+        sortedChaptersRef.current,
+        st.currentFileId,
+        audio.getCurrentTime(),
+        total,
+      );
+      st.setCurrentChapterIndex(chapterIndex);
+    });
+
+    const offTimeUpdate = audio.on("timeupdate", () => {
+      const st = usePlayerStore.getState();
+      const current = audio.getCurrentTime();
+      const total = audio.getDuration() || st.duration;
+      st.setPosition(current);
+      if (total > 0) {
+        st.setDuration(total);
+      }
+      const chapterIndex = findCurrentChapterIndex(sortedChaptersRef.current, st.currentFileId, current, total);
+      st.setCurrentChapterIndex(chapterIndex);
+
+      const sleep = st.sleepTimer;
+      if (sleep?.mode === "minutes" && sleep.endsAt != null && Date.now() >= sleep.endsAt) {
+        pause();
+        st.setSleepTimer(null);
+      } else if (sleep?.mode === "end-of-chapter" && chapterIndex >= 0) {
+        const chapter = sortedChaptersRef.current[chapterIndex];
+        if (chapter) {
+          const chapterEnd = chapterEndSeconds(chapter, sortedChaptersRef.current, chapterIndex, total);
+          if (Number.isFinite(chapterEnd) && current >= chapterEnd - 0.05) {
+            pause();
+            st.setSleepTimer(null);
+          }
+        }
+      } else if (sleep?.mode === "end-of-book") {
+        const last = sortedFilesRef.current.length - 1;
+        const atEnd = st.currentFileIndex >= last && last >= 0 && total > 0 && current >= total - 0.25;
+        if (atEnd) {
+          pause();
+          st.setSleepTimer(null);
+        }
+      }
+
+      void flushProgress(false);
+      void reportPlaybackState();
+    });
+
+    const offEnded = audio.on("ended", () => {
+      void flushProgress(true);
+      const st = usePlayerStore.getState();
+      const next = st.currentFileIndex + 1;
+      if (next < sortedFilesRef.current.length) {
+        void mountFile(next, 0, true);
+        return;
+      }
+      st.setIsPlaying(false);
+      st.setSleepTimer(null);
+      void invoke(IPC_CHANNELS.playback.MARK_COMPLETE, st.currentBook?.id);
+      void reportPlaybackState();
+    });
+
+    return () => {
+      offCanPlay();
+      offLoadedMetadata();
+      offTimeUpdate();
+      offEnded();
+    };
+  }, [audio, flushProgress, invoke, mountFile, pause, play, reportPlaybackState]);
+
+  useEffect(() => {
     void (async () => {
-      const [skip, eq, sc] = await Promise.all([
+      const [skipSilence, eqPreset, shortcuts] = await Promise.all([
         invoke<boolean>(IPC_CHANNELS.settings.GET_SKIP_SILENCE),
         invoke<EqPreset>(IPC_CHANNELS.settings.GET_EQ_PRESET),
         invoke<ShortcutMap>(IPC_CHANNELS.settings.GET_SHORTCUTS),
       ]);
-      usePlayerStore.getState().setSkipSilenceEnabled(skip);
-      usePlayerStore.getState().setEqPreset(eq);
-      shortcutsRef.current = sc;
+      usePlayerStore.getState().setSkipSilenceEnabled(skipSilence);
+      usePlayerStore.getState().setEqPreset(eqPreset);
+      shortcutsRef.current = shortcuts;
     })();
   }, [invoke]);
 
   useEffect(() => {
-    const g = html5GraphRef.current;
-    if (g) {
-      rebuildHtml5EqChain(g, eqPreset);
-    }
-  }, [eqPreset]);
+    const off = subscribe(IPC_CHANNELS.playback.CHAPTERS_LOADED, (...args: unknown[]) => {
+      const raw = args[0];
+      if (!Array.isArray(raw)) {
+        return;
+      }
+      const st = usePlayerStore.getState();
+      const fid = st.currentFileId;
+      if (fid == null) {
+        return;
+      }
+      const mapped: Chapter[] = raw
+        .filter((x): x is Record<string, unknown> => x != null && typeof x === "object" && !Array.isArray(x))
+        .map((rec, i) => {
+          const title = typeof rec.title === "string" ? rec.title : "";
+          const stt = typeof rec.startTime === "number" && Number.isFinite(rec.startTime) ? rec.startTime : 0;
+          return { id: -(i + 1), file_id: fid, title, start_time: stt, end_time: null };
+        });
+      const others = st.chapters.filter((c) => c.file_id !== fid);
+      const merged = sortChapters([...others, ...mapped], st.files);
+      sortedChaptersRef.current = merged;
+      usePlayerStore.getState().setChapters(merged);
+      const total = st.duration;
+      const pos = st.position;
+      const chapterIndex = findCurrentChapterIndex(merged, fid, pos, total);
+      usePlayerStore.getState().setCurrentChapterIndex(chapterIndex);
+    });
+    return () => off();
+  }, [subscribe]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.repeat) {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) {
         return;
       }
-      const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
         return;
       }
-      const sc = shortcutsRef.current;
-      if (!sc) {
+      const shortcuts = shortcutsRef.current;
+      if (!shortcuts) {
         return;
       }
-      if (acceleratorMatchesKeyboard(sc.playPause, e)) {
-        e.preventDefault();
+      if (acceleratorMatchesKeyboard(shortcuts.playPause, event)) {
+        event.preventDefault();
         togglePlay();
-        return;
-      }
-      if (acceleratorMatchesKeyboard(sc.nextChapter, e)) {
-        e.preventDefault();
+      } else if (acceleratorMatchesKeyboard(shortcuts.nextChapter, event)) {
+        event.preventDefault();
         nextChapter();
-        return;
-      }
-      if (acceleratorMatchesKeyboard(sc.prevChapter, e)) {
-        e.preventDefault();
+      } else if (acceleratorMatchesKeyboard(shortcuts.prevChapter, event)) {
+        event.preventDefault();
         prevChapter();
-        return;
-      }
-      if (acceleratorMatchesKeyboard(sc.nextFile, e)) {
-        e.preventDefault();
+      } else if (acceleratorMatchesKeyboard(shortcuts.nextFile, event)) {
+        event.preventDefault();
         nextFile();
-        return;
-      }
-      if (acceleratorMatchesKeyboard(sc.prevFile, e)) {
-        e.preventDefault();
+      } else if (acceleratorMatchesKeyboard(shortcuts.prevFile, event)) {
+        event.preventDefault();
         prevFile();
-        return;
-      }
-      if (acceleratorMatchesKeyboard(sc.speedUp, e)) {
-        e.preventDefault();
+      } else if (acceleratorMatchesKeyboard(shortcuts.seekForward30, event)) {
+        event.preventDefault();
+        seekBy(30);
+      } else if (acceleratorMatchesKeyboard(shortcuts.seekBack30, event)) {
+        event.preventDefault();
+        seekBy(-30);
+      } else if (acceleratorMatchesKeyboard(shortcuts.speedUp, event)) {
+        event.preventDefault();
         cycleSpeed();
-        return;
-      }
-      if (acceleratorMatchesKeyboard(sc.speedDown, e)) {
-        e.preventDefault();
-        const cur = usePlayerStore.getState().speed;
-        const idx = SPEED_CYCLE_SEQUENCE.findIndex((s) => Math.abs(s - cur) < 0.02);
+      } else if (acceleratorMatchesKeyboard(shortcuts.speedDown, event)) {
+        event.preventDefault();
+        const current = usePlayerStore.getState().speed;
+        const idx = SPEED_CYCLE_SEQUENCE.findIndex((item) => Math.abs(item - current) < 0.02);
         const prevIdx = idx <= 0 ? SPEED_CYCLE_SEQUENCE.length - 1 : idx - 1;
-        const prevSp = SPEED_CYCLE_SEQUENCE[prevIdx]!;
-        setSpeed(prevSp);
+        setSpeed(SPEED_CYCLE_SEQUENCE[prevIdx]!);
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [cycleSpeed, nextChapter, nextFile, prevChapter, prevFile, setSpeed, togglePlay]);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [cycleSpeed, nextChapter, nextFile, prevChapter, prevFile, seekBy, setSpeed, togglePlay]);
 
   useEffect(() => {
-    const unsub = subscribe(IPC_CHANNELS.playback.MEDIA_KEY, (...args: unknown[]) => {
+    const off = subscribe(IPC_CHANNELS.playback.MEDIA_KEY, (...args: unknown[]) => {
       const action = args[0];
       if (action === "play-pause") {
         togglePlay();
@@ -821,27 +785,45 @@ function usePlayerCore(): {
         seekBy(-30);
       }
     });
-    return () => unsub();
+    return () => off();
   }, [nextFile, prevFile, seekBy, subscribe, togglePlay]);
 
-  useEffect(
-    () => () => {
-      clearPositionInterval();
-      void flushProgress(true);
-      stopHowl();
-    },
-    [clearPositionInterval, flushProgress, stopHowl],
-  );
+  useEffect(() => {
+    audioRef.current = audio;
+  }, [audio]);
+
+  useEffect(() => {
+    flushProgressRef.current = flushProgress;
+  }, [flushProgress]);
+
+  useEffect(() => {
+    return () => {
+      void flushProgressRef.current(true);
+      audioRef.current.pause();
+    };
+  }, []);
 
   return {
+    currentBook,
+    currentFile,
+    isPlaying,
+    position,
+    duration,
+    speed,
+    error: mediaError,
     loadBook,
     play,
     pause,
+    resume,
     togglePlay,
     seekTo,
+    seek: seekTo,
     seekToChapter,
+    skipToChapter: seekToChapter,
     seekToBookmark,
     seekBy,
+    skipForward: (seconds = 30) => seekBy(seconds),
+    skipBack: (seconds = 15) => seekBy(-seconds),
     nextFile,
     prevFile,
     nextChapter,

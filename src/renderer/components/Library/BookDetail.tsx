@@ -1,4 +1,4 @@
-import { type ReactElement, useCallback, useEffect, useState } from "react";
+import { type ReactElement, useCallback, useEffect, useRef, useState } from "react";
 import { IPC_CHANNELS } from "@shared/ipc-channels";
 import type { BookDetailPayload, LibrarySetStatusPayload, MetadataUpdate } from "@shared/library-types";
 import { useIPC } from "../../hooks/useIPC.js";
@@ -53,6 +53,7 @@ export function BookDetail({
   const [tagInput, setTagInput] = useState("");
   const [savingMeta, setSavingMeta] = useState(false);
   const [fetchingCover, setFetchingCover] = useState(false);
+  const silentReingestAttempted = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -74,6 +75,36 @@ export function BookDetail({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    silentReingestAttempted.current = false;
+  }, [bookId]);
+
+  useEffect(() => {
+    if (!detail?.book) {
+      return;
+    }
+    const authorBlank = !detail.book.author?.trim();
+    if (!authorBlank || silentReingestAttempted.current) {
+      return;
+    }
+    silentReingestAttempted.current = true;
+    void (async () => {
+      try {
+        const updated = await invoke<BookDetailPayload | null>(IPC_CHANNELS.library.REINGEST_BOOK_METADATA, bookId);
+        if (!updated) {
+          return;
+        }
+        setDetail(updated);
+        const st = usePlayerStore.getState();
+        if (st.playbackError && st.currentBook?.id === bookId) {
+          await loadBook(bookId);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, [detail, bookId, invoke, loadBook]);
 
   const onDelete = useCallback(async () => {
     if (!window.confirm("Delete this book from the library? This cannot be undone.")) {
@@ -210,7 +241,7 @@ export function BookDetail({
         style={{
           position: "fixed",
           inset: 0,
-          background: "rgba(0,0,0,0.55)",
+          background: "var(--accent-soft)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -223,11 +254,11 @@ export function BookDetail({
           role="dialog"
           aria-modal="true"
           style={{
-            background: "#1a1a1a",
-            borderRadius: 12,
+            background: "var(--bg-surface)",
+            borderRadius: "var(--radius-lg)",
             padding: 24,
             minWidth: 280,
-            border: "1px solid #333",
+            border: "1px solid var(--border-default)",
           }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -243,7 +274,7 @@ export function BookDetail({
         style={{
           position: "fixed",
           inset: 0,
-          background: "rgba(0,0,0,0.55)",
+          background: "var(--accent-soft)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -256,11 +287,11 @@ export function BookDetail({
           role="dialog"
           aria-modal="true"
           style={{
-            background: "#1a1a1a",
-            borderRadius: 12,
+            background: "var(--bg-surface)",
+            borderRadius: "var(--radius-lg)",
             padding: 24,
             minWidth: 280,
-            border: "1px solid #333",
+            border: "1px solid var(--border-default)",
           }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -286,7 +317,7 @@ export function BookDetail({
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.55)",
+        background: "var(--accent-soft)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -300,20 +331,36 @@ export function BookDetail({
         role="dialog"
         aria-modal="true"
         style={{
-          background: "#141414",
-          borderRadius: 16,
+          background: "var(--bg-surface)",
+          borderRadius: "var(--radius-lg)",
           maxWidth: 900,
           width: "100%",
           maxHeight: "90vh",
           overflow: "auto",
-          border: "1px solid #2a2a2a",
+          border: "1px solid var(--border-subtle)",
           display: "flex",
           flexDirection: "column",
         }}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: "flex", justifyContent: "flex-end", padding: "8px 12px 0", gap: 8 }}>
-          <button type="button" onClick={onClose} style={{ cursor: "pointer" }}>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close book details"
+            style={{
+              cursor: "pointer",
+              WebkitAppearance: "none",
+              appearance: "none",
+              border: "none",
+              background: "transparent",
+              color: "var(--text-muted)",
+              fontSize: 18,
+              lineHeight: 1,
+              padding: "4px 8px",
+              borderRadius: "var(--radius-sm)",
+            }}
+          >
             ✕
           </button>
         </div>
@@ -330,13 +377,13 @@ export function BookDetail({
               style={{
                 width: "100%",
                 aspectRatio: "1",
-                borderRadius: 12,
+                borderRadius: "var(--radius-lg)",
                 overflow: "hidden",
-                background: "#222",
+                background: "var(--bg-elevated)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                border: editing ? "2px dashed #4a8fd4" : "none",
+                border: editing ? "2px dashed var(--accent)" : "none",
                 padding: 0,
                 cursor: editing ? "pointer" : "default",
               }}
@@ -344,31 +391,23 @@ export function BookDetail({
               {coverDisplayUrl ? (
                 <img src={coverDisplayUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               ) : (
-                <span style={{ fontSize: 48, fontWeight: 700, color: "#555" }}>{initials(book.title, book.author)}</span>
+                <span style={{ fontSize: 48, fontWeight: 700, color: "var(--text-muted)" }}>{initials(book.title, book.author)}</span>
               )}
             </button>
             {coverHint ? (
-              <p style={{ fontSize: 11, color: "#8ab4e6", marginTop: 8 }}>{coverHint}</p>
+              <p style={{ fontSize: 11, color: "var(--accent)", marginTop: 8 }}>{coverHint}</p>
             ) : null}
-            <div style={{ marginTop: 12, fontSize: 12, color: "#777" }}>
+            <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)" }}>
               Progress: {progress_percent.toFixed(0)}%
             </div>
             <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-              <label style={{ fontSize: 12, color: "#888" }}>
+              <label style={{ fontSize: 12, color: "var(--text-secondary)" }}>
                 Status
                 <select
                   value={book.status}
                   onChange={(e) => void onStatusChange(e.target.value as LibrarySetStatusPayload["status"])}
-                  style={{
-                    display: "block",
-                    marginTop: 4,
-                    width: "100%",
-                    padding: "8px 10px",
-                    borderRadius: 8,
-                    border: "1px solid #333",
-                    background: "#1a1a1a",
-                    color: "#e8e8e8",
-                  }}
+                  className="select-base"
+                  style={{ display: "block", marginTop: 4, width: "100%" }}
                 >
                   <option value="unstarted">Unstarted</option>
                   <option value="in-progress">In Progress</option>
@@ -379,14 +418,8 @@ export function BookDetail({
                 type="button"
                 disabled={fetchingCover}
                 onClick={() => void onFetchCover()}
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #335",
-                  background: "#1e2838",
-                  color: "#b8d4f0",
-                  cursor: fetchingCover ? "wait" : "pointer",
-                }}
+                className="btn-secondary"
+                style={{ cursor: fetchingCover ? "wait" : "pointer" }}
               >
                 {fetchingCover ? "Fetching…" : "Fetch Cover Art"}
               </button>
@@ -399,22 +432,15 @@ export function BookDetail({
                   <input
                     value={displayDraft.title}
                     onChange={(e) => setDraft((d) => (d ? { ...d, title: e.target.value } : d))}
-                    style={{
-                      width: "100%",
-                      fontSize: 22,
-                      padding: "4px 8px",
-                      borderRadius: 8,
-                      border: "1px solid #333",
-                      background: "#0f0f0f",
-                      color: "#e8e8e8",
-                    }}
+                    className="input-base"
+                    style={{ width: "100%", fontSize: 22, padding: "4px 8px" }}
                   />
                 ) : (
                   book.title
                 )}
               </h2>
               {!editing ? (
-                <button type="button" onClick={beginEdit} style={{ padding: "8px 14px", borderRadius: 8, cursor: "pointer" }}>
+                <button type="button" onClick={beginEdit} className="btn-secondary">
                   Edit
                 </button>
               ) : (
@@ -423,49 +449,53 @@ export function BookDetail({
                     type="button"
                     disabled={savingMeta}
                     onClick={() => void saveMetadata()}
-                    style={{ padding: "8px 14px", borderRadius: 8, cursor: savingMeta ? "wait" : "pointer" }}
+                    className="btn-primary"
+                    style={{ cursor: savingMeta ? "wait" : "pointer" }}
                   >
                     {savingMeta ? "Saving…" : "Save"}
                   </button>
-                  <button type="button" onClick={cancelEdit} style={{ padding: "8px 14px", borderRadius: 8, cursor: "pointer" }}>
+                  <button type="button" onClick={cancelEdit} className="btn-secondary">
                     Cancel
                   </button>
                 </div>
               )}
             </div>
 
-            <div style={{ color: "#aaa", fontSize: 14 }}>
+            <div style={{ color: "var(--text-secondary)", fontSize: 14 }}>
               <div>
-                <strong style={{ color: "#888" }}>Author:</strong>{" "}
+                <strong style={{ color: "var(--text-muted)" }}>Author:</strong>{" "}
                 {editing && displayDraft ? (
                   <input
                     value={displayDraft.author ?? ""}
                     onChange={(e) => setDraft((d) => (d ? { ...d, author: e.target.value || null } : d))}
-                    style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #333", background: "#0f0f0f", color: "#e8e8e8" }}
+                    className="input-base"
+                    style={{ padding: "4px 8px" }}
                   />
                 ) : (
                   book.author ?? "—"
                 )}
               </div>
               <div style={{ marginTop: 6 }}>
-                <strong style={{ color: "#888" }}>Narrator:</strong>{" "}
+                <strong style={{ color: "var(--text-muted)" }}>Narrator:</strong>{" "}
                 {editing && displayDraft ? (
                   <input
                     value={displayDraft.narrator ?? ""}
                     onChange={(e) => setDraft((d) => (d ? { ...d, narrator: e.target.value || null } : d))}
-                    style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #333", background: "#0f0f0f", color: "#e8e8e8" }}
+                    className="input-base"
+                    style={{ padding: "4px 8px" }}
                   />
                 ) : (
                   book.narrator ?? "—"
                 )}
               </div>
               <div style={{ marginTop: 6 }}>
-                <strong style={{ color: "#888" }}>Series:</strong>{" "}
+                <strong style={{ color: "var(--text-muted)" }}>Series:</strong>{" "}
                 {editing && displayDraft ? (
                   <input
                     value={displayDraft.series ?? ""}
                     onChange={(e) => setDraft((d) => (d ? { ...d, series: e.target.value || null } : d))}
-                    style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #333", background: "#0f0f0f", color: "#e8e8e8" }}
+                    className="input-base"
+                    style={{ padding: "4px 8px" }}
                   />
                 ) : book.series ? (
                   book.series
@@ -474,7 +504,7 @@ export function BookDetail({
                 )}
                 {editing && displayDraft ? (
                   <span style={{ marginLeft: 8 }}>
-                    <strong style={{ color: "#888" }}>#</strong>
+                    <strong style={{ color: "var(--text-muted)" }}>#</strong>
                     <input
                       type="number"
                       value={displayDraft.series_order ?? ""}
@@ -489,15 +519,8 @@ export function BookDetail({
                             : d,
                         );
                       }}
-                      style={{
-                        width: 72,
-                        marginLeft: 4,
-                        padding: "4px 8px",
-                        borderRadius: 6,
-                        border: "1px solid #333",
-                        background: "#0f0f0f",
-                        color: "#e8e8e8",
-                      }}
+                      className="input-base"
+                      style={{ width: 72, marginLeft: 4, padding: "4px 8px" }}
                     />
                   </span>
                 ) : book.series_order != null ? (
@@ -507,7 +530,7 @@ export function BookDetail({
             </div>
 
             <div>
-              <strong style={{ color: "#888", fontSize: 13 }}>Tags</strong>
+              <strong style={{ color: "var(--text-muted)", fontSize: 13 }}>Tags</strong>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8, alignItems: "center" }}>
                 {book.tags.map((t) => (
                   <span
@@ -518,9 +541,9 @@ export function BookDetail({
                       gap: 6,
                       padding: "4px 10px",
                       borderRadius: 999,
-                      background: "#252525",
+                      background: "var(--bg-hover)",
                       fontSize: 13,
-                      color: "#ccc",
+                      color: "var(--text-secondary)",
                     }}
                   >
                     {t}
@@ -530,7 +553,7 @@ export function BookDetail({
                       style={{
                         border: "none",
                         background: "transparent",
-                        color: "#888",
+                        color: "var(--text-muted)",
                         cursor: "pointer",
                         padding: 0,
                         lineHeight: 1,
@@ -552,50 +575,35 @@ export function BookDetail({
                     }
                   }}
                   placeholder="Add tag…"
-                  style={{
-                    minWidth: 120,
-                    padding: "6px 10px",
-                    borderRadius: 8,
-                    border: "1px solid #333",
-                    background: "#0f0f0f",
-                    color: "#e8e8e8",
-                  }}
+                  className="input-base"
+                  style={{ minWidth: 120, padding: "6px 10px" }}
                 />
               </div>
             </div>
 
             {editing && displayDraft ? (
-              <label style={{ fontSize: 13, color: "#bbb" }}>
+              <label style={{ fontSize: 13, color: "var(--text-secondary)" }}>
                 Description
                 <textarea
                   value={displayDraft.description ?? ""}
                   onChange={(e) => setDraft((d) => (d ? { ...d, description: e.target.value || null } : d))}
                   rows={5}
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    marginTop: 6,
-                    padding: "8px 10px",
-                    borderRadius: 8,
-                    border: "1px solid #333",
-                    background: "#0f0f0f",
-                    color: "#e8e8e8",
-                    resize: "vertical",
-                  }}
+                  className="input-base"
+                  style={{ display: "block", width: "100%", marginTop: 6, resize: "vertical" }}
                 />
               </label>
             ) : book.description ? (
-              <p style={{ margin: 0, color: "#bbb", fontSize: 14, lineHeight: 1.5 }}>{book.description}</p>
+              <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 14, lineHeight: 1.5 }}>{book.description}</p>
             ) : (
-              <p style={{ margin: 0, color: "#555", fontSize: 13 }}>No description.</p>
+              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 13 }}>No description.</p>
             )}
 
             <div>
               <h3 style={{ fontSize: 15, margin: "16px 0 8px" }}>Files</h3>
-              <ul style={{ margin: 0, paddingLeft: 18, color: "#ccc", fontSize: 13 }}>
+              <ul style={{ margin: 0, paddingLeft: 18, color: "var(--text-secondary)", fontSize: 13 }}>
                 {files.map((f) => (
                   <li key={f.id} style={{ marginBottom: 4 }}>
-                    <span style={{ color: "#888" }}>#{f.track_order ?? "?"}</span>{" "}
+                    <span style={{ color: "var(--text-muted)" }}>#{f.track_order ?? "?"}</span>{" "}
                     {f.file_path.split(/[/\\]/).pop() ?? f.file_path} — {formatDuration(f.duration)}
                   </li>
                 ))}
@@ -605,7 +613,7 @@ export function BookDetail({
             {chapters.length > 0 ? (
               <div>
                 <h3 style={{ fontSize: 15, margin: "16px 0 8px" }}>Chapters</h3>
-                <ul style={{ margin: 0, paddingLeft: 18, color: "#ccc", fontSize: 13, maxHeight: 200, overflow: "auto" }}>
+                <ul style={{ margin: 0, paddingLeft: 18, color: "var(--text-secondary)", fontSize: 13, maxHeight: 200, overflow: "auto" }}>
                   {chapters.map((c) => (
                     <li key={c.id} style={{ marginBottom: 4 }}>
                       {c.title ?? "Chapter"} — {formatDuration(c.start_time)}{" "}
@@ -620,28 +628,19 @@ export function BookDetail({
               <button
                 type="button"
                 onClick={() => void onPlayClick()}
+                className="btn-secondary"
                 style={{
-                  padding: "10px 20px",
-                  borderRadius: 8,
-                  border: "1px solid #333",
-                  background: playingHere ? "#1a3a1a" : "#2a6cff22",
-                  color: playingHere ? "#8d8" : "#e8e8e8",
-                  cursor: "pointer",
+                  background: playingHere ? "rgba(74, 222, 128, 0.12)" : "var(--accent-soft)",
+                  color: playingHere ? "var(--color-success)" : "var(--accent)",
+                  borderColor: playingHere ? "rgba(74, 222, 128, 0.4)" : "var(--accent)",
                 }}
               >
-                {playingHere ? "Playing… (pause)" : activeHere && !isPlaying ? "Resume" : "Play"}
+                {playingHere ? "Pause" : activeHere && !isPlaying ? "Resume" : "Play"}
               </button>
               <button
                 type="button"
                 onClick={() => void onDelete()}
-                style={{
-                  padding: "10px 20px",
-                  borderRadius: 8,
-                  border: "1px solid #522",
-                  background: "#301818",
-                  color: "#e88",
-                  cursor: "pointer",
-                }}
+                className="btn-danger"
               >
                 Delete book
               </button>

@@ -1,29 +1,45 @@
 import { useCallback, useEffect } from "react";
 import { IPC_CHANNELS } from "@shared/ipc-channels";
-import type { DownloadItem, RssFeedPayload, SavedPodcastFeed, TorrentProgress } from "@shared/library-types";
+import type { DownloadItem, DownloadProgressPush, RssFeedPayload, SavedPodcastFeed } from "@shared/library-types";
+import { isMagnetLikeString } from "@shared/magnet-display";
 import { useIPC } from "./useIPC.js";
 import { useLibrary } from "./useLibrary.js";
 import { useDownloadStore } from "../store/downloadStore.js";
 
-function mapProgressToPartial(p: TorrentProgress): Partial<DownloadItem> & { id: number } {
-  return {
+function mapProgressToPartial(p: DownloadProgressPush): Partial<DownloadItem> & { id: number } {
+  const torrentTitle = p.torrentName?.trim() ?? null;
+  const rawName = typeof p.name === "string" ? p.name.trim() : "";
+  const base: Partial<DownloadItem> & { id: number } = {
     id: p.id,
-    display_name: p.name,
     progress_pct: p.progress_pct,
     speed_bps: p.speed,
     eta_seconds: p.eta,
     status: p.status as DownloadItem["status"],
   };
+
+  if (rawName && !isMagnetLikeString(rawName)) {
+    return {
+      ...base,
+      display_name: rawName,
+      displayName: torrentTitle ?? rawName,
+    };
+  }
+
+  if (isMagnetLikeString(rawName)) {
+    return {
+      ...base,
+      display_name: null,
+      displayName: torrentTitle ?? null,
+    };
+  }
+
+  return torrentTitle ? { ...base, displayName: torrentTitle } : base;
 }
 
 export function useDownloads(): {
   downloads: DownloadItem[];
   isLoading: boolean;
-  addMagnet: (uri: string) => Promise<{ downloadId: number }>;
-  addTorrentFile: (filePath: string) => Promise<{ downloadId: number }>;
   addUrl: (url: string) => Promise<{ downloadId: number }>;
-  pause: (id: number) => Promise<void>;
-  resume: (id: number) => Promise<void>;
   cancel: (id: number) => Promise<void>;
   retry: (id: number) => Promise<void>;
   /** RSS / podcast feeds (Milestone 5) */
@@ -70,46 +86,19 @@ export function useDownloads(): {
 
   useEffect(() => {
     const unsubProgress = subscribe(IPC_CHANNELS.downloads.PROGRESS_UPDATE, (...payload: unknown[]) => {
-      const p = payload[0] as TorrentProgress;
+      const p = payload[0] as DownloadProgressPush;
       upsertDownload(mapProgressToPartial(p));
     });
-    const unsubDone = subscribe(IPC_CHANNELS.downloads.COMPLETED, (...payload: unknown[]) => {
-      const body = payload[0] as { downloadId: number; bookId: number };
-      upsertDownload({
-        id: body.downloadId,
-        book_id: body.bookId,
-        status: "completed",
-        progress_pct: 100,
-        speed_bps: 0,
-        eta_seconds: null,
-        error_message: null,
-      });
-      void refreshLibrary();
-      void refreshDownloads();
+    const unsubDone = subscribe(IPC_CHANNELS.downloads.COMPLETED, () => {
+      void (async () => {
+        await Promise.all([refreshLibrary(), refreshDownloads()]);
+      })();
     });
     return () => {
       unsubProgress();
       unsubDone();
     };
   }, [subscribe, upsertDownload, refreshLibrary, refreshDownloads]);
-
-  const addMagnet = useCallback(
-    async (uri: string) => {
-      const res = await invoke<{ downloadId: number }>(IPC_CHANNELS.downloads.ADD_MAGNET, uri);
-      await refreshDownloads();
-      return res;
-    },
-    [invoke, refreshDownloads],
-  );
-
-  const addTorrentFile = useCallback(
-    async (filePath: string) => {
-      const res = await invoke<{ downloadId: number }>(IPC_CHANNELS.downloads.ADD_TORRENT_FILE, filePath);
-      await refreshDownloads();
-      return res;
-    },
-    [invoke, refreshDownloads],
-  );
 
   const addUrl = useCallback(
     async (url: string) => {
@@ -118,20 +107,6 @@ export function useDownloads(): {
       return res;
     },
     [invoke, refreshDownloads],
-  );
-
-  const pause = useCallback(
-    async (id: number) => {
-      await invoke(IPC_CHANNELS.downloads.PAUSE, id);
-    },
-    [invoke],
-  );
-
-  const resume = useCallback(
-    async (id: number) => {
-      await invoke(IPC_CHANNELS.downloads.RESUME, id);
-    },
-    [invoke],
   );
 
   const cancel = useCallback(
@@ -187,11 +162,7 @@ export function useDownloads(): {
   return {
     downloads,
     isLoading,
-    addMagnet,
-    addTorrentFile,
     addUrl,
-    pause,
-    resume,
     cancel,
     retry,
     fetchFeed,

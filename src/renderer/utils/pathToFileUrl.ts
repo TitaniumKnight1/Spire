@@ -16,5 +16,5 @@ export function pathToFileUrlHref(absPath: string): string {
       encoded.push(encodeURIComponent(seg));
     }
   }
-  return `file://${encoded.join("/")}`;
+  return `file:///${encoded.join("/")}`;
 }

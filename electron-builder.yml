@@ -28,3 +28,8 @@ linux:
     - target: AppImage
       arch:
         - x64
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerSidebar: null
+  include: build/installer.nsh

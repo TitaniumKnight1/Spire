@@ -39,16 +39,16 @@ function StatCard({ label, value }: { label: string; value: string }): ReactElem
       style={{
         flex: "1 1 140px",
         minWidth: 120,
-        padding: 14,
-        borderRadius: 10,
-        border: "1px solid #2a2a2a",
-        background: "#141414",
+        padding: "16px 20px",
+        borderRadius: "var(--radius-lg)",
+        border: "1px solid var(--border-subtle)",
+        background: "var(--bg-surface)",
       }}
     >
-      <div style={{ fontSize: 11, color: "#888", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>
+      <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>
         {label}
       </div>
-      <div style={{ fontSize: 20, fontWeight: 600, color: "#f2f2f2" }}>{value}</div>
+      <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: "-0.03em", color: "var(--text-primary)" }}>{value}</div>
     </div>
   );
 }
@@ -62,7 +62,7 @@ export function StatsPanel(): ReactElement {
   }, [invoke]);
 
   if (stats == null) {
-    return <div style={{ color: "#888", fontSize: 14 }}>Loading stats…</div>;
+    return <div style={{ color: "var(--text-muted)", fontSize: 14 }}>Loading stats…</div>;
   }
 
   if (isAllZero(stats)) {
@@ -70,9 +70,9 @@ export function StatsPanel(): ReactElement {
       <div
         style={{
           padding: 24,
-          borderRadius: 12,
-          border: "1px dashed #333",
-          color: "#888",
+          borderRadius: "var(--radius-lg)",
+          border: "1px dashed var(--border-default)",
+          color: "var(--text-muted)",
           fontSize: 14,
           textAlign: "center",
         }}

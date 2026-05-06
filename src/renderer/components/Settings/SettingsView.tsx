@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactElement, useCallback, useEffect, useState } from "react";
+import { type ReactElement, useCallback, useEffect, useState } from "react";
 import { IPC_CHANNELS } from "@shared/ipc-channels";
 import type { EqPreset } from "@shared/library-types";
 import { useIPC } from "../../hooks/useIPC.js";
@@ -6,7 +6,7 @@ import { useLibrary } from "../../hooks/useLibrary.js";
 import { ShortcutConfigurator } from "./ShortcutConfigurator.js";
 import { StatsPanel } from "./StatsPanel.js";
 
-const SIDEBAR_W = 200;
+const SIDEBAR_W = 180;
 
 const EQ_OPTIONS: { value: EqPreset; label: string }[] = [
   { value: "flat", label: "Flat" },
@@ -46,17 +46,21 @@ export function SettingsView(): ReactElement {
   const [defaultSpeed, setDefaultSpeed] = useState<number>(1);
   const [sleepDefault, setSleepDefault] = useState<string>("off");
   const [autoFetchCovers, setAutoFetchCovers] = useState<boolean>(true);
+  const [torrentProxyHost, setTorrentProxyHost] = useState("");
+  const [torrentProxyPort, setTorrentProxyPort] = useState("");
   const [watchPath, setWatchPath] = useState<string | null | undefined>(undefined);
   const [appInfo, setAppInfo] = useState<{ version: string; platform: string } | null>(null);
   const [libBusy, setLibBusy] = useState(false);
+  const [activeSection, setActiveSection] = useState("section-stats");
 
   const loadAll = useCallback(async () => {
-    const [ss, eq, spd, sleep, covers, wf, info] = await Promise.all([
+    const [ss, eq, spd, sleep, covers, proxy, wf, info] = await Promise.all([
       invoke<boolean>(IPC_CHANNELS.settings.GET_SKIP_SILENCE),
       invoke<EqPreset>(IPC_CHANNELS.settings.GET_EQ_PRESET),
       invoke<number>(IPC_CHANNELS.settings.GET_DEFAULT_SPEED),
       invoke<string>(IPC_CHANNELS.settings.GET_SLEEP_TIMER_DEFAULT),
       invoke<boolean>(IPC_CHANNELS.settings.GET_AUTO_FETCH_COVERS),
+      invoke<{ host: string; port: number } | null>(IPC_CHANNELS.settings.SETTINGS_GET_TORRENT_PROXY),
       getWatchFolder(),
       invoke<{ version: string; platform: string }>(IPC_CHANNELS.settings.GET_APP_INFO),
     ]);
@@ -65,6 +69,13 @@ export function SettingsView(): ReactElement {
     setDefaultSpeed(spd);
     setSleepDefault(sleep);
     setAutoFetchCovers(covers);
+    if (proxy) {
+      setTorrentProxyHost(proxy.host);
+      setTorrentProxyPort(String(proxy.port));
+    } else {
+      setTorrentProxyHost("");
+      setTorrentProxyPort("");
+    }
     setWatchPath(wf);
     setAppInfo(info);
   }, [getWatchFolder, invoke]);
@@ -77,16 +88,19 @@ export function SettingsView(): ReactElement {
     <button
       key={id}
       type="button"
-      onClick={() => scrollToId(id)}
+      onClick={() => {
+        setActiveSection(id);
+        scrollToId(id);
+      }}
       style={{
         textAlign: "left",
-        padding: "8px 10px",
-        borderRadius: 8,
+        padding: "7px 16px",
+        borderRadius: "var(--radius-md)",
         border: "1px solid transparent",
-        background: "transparent",
-        color: "#ccc",
+        background: activeSection === id ? "var(--accent-soft)" : "transparent",
+        color: activeSection === id ? "var(--accent)" : "var(--text-secondary)",
         cursor: "pointer",
-        fontSize: 14,
+        fontSize: 13,
       }}
     >
       {label}
@@ -94,37 +108,40 @@ export function SettingsView(): ReactElement {
   );
 
   return (
-    <div style={{ display: "flex", gap: 0, minHeight: "70vh" }}>
+    <div style={{ display: "flex", gap: 0, minHeight: "70vh", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-lg)", overflow: "hidden" }}>
       <nav
         style={{
           width: SIDEBAR_W,
           flexShrink: 0,
-          borderRight: "1px solid #222",
+          background: "var(--bg-sidebar)",
+          borderRight: "1px solid var(--border-subtle)",
           padding: "12px 10px",
           display: "flex",
           flexDirection: "column",
           gap: 4,
         }}
       >
-        <div style={{ fontWeight: 700, marginBottom: 8, color: "#fff" }}>Settings</div>
+        <div className="section-label">Settings</div>
         {navBtn("section-stats", "Stats")}
         {navBtn("section-playback", "Playback")}
         {navBtn("section-library", "Library")}
         {navBtn("section-shortcuts", "Shortcuts")}
         {navBtn("section-about", "About")}
       </nav>
-      <div style={{ flex: 1, minWidth: 0, paddingLeft: 20, overflowY: "auto" }}>
-        <h1 style={{ marginTop: 0, fontSize: 22 }}>Preferences</h1>
+      <div style={{ flex: 1, minWidth: 0, padding: "36px 40px", maxWidth: 700, overflowY: "auto", background: "var(--bg-base)" }}>
+        <h1 className="page-title" style={{ marginBottom: 24 }}>
+          Preferences
+        </h1>
 
         <section id="section-stats" style={{ marginBottom: 32 }}>
-          <h2 style={{ marginTop: 0, fontSize: 18, color: "#f4f4f4" }}>Stats</h2>
+          <h2 style={sectionHeader}>Stats</h2>
           <StatsPanel />
         </section>
 
         <section id="section-playback" style={{ marginBottom: 32 }}>
-          <h2 style={{ marginTop: 0, fontSize: 18, color: "#f4f4f4" }}>Playback</h2>
+          <h2 style={sectionHeader}>Playback</h2>
           <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 520 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14, color: "#ddd" }}>
+            <label className="checkbox-control">
               <input
                 type="checkbox"
                 checked={skipSilence === true}
@@ -134,11 +151,13 @@ export function SettingsView(): ReactElement {
                   setSkipSilence(v);
                   void invoke(IPC_CHANNELS.settings.SAVE_SKIP_SILENCE, v);
                 }}
+                className="checkbox-input"
               />
+              <span className="checkbox-box" />
               Skip silence
             </label>
 
-            <label style={{ fontSize: 14, color: "#ddd", display: "flex", flexDirection: "column", gap: 6 }}>
+            <label style={{ fontSize: 14, color: "var(--text-secondary)", display: "flex", flexDirection: "column", gap: 6 }}>
               EQ preset
               <select
                 value={eqPreset ?? "flat"}
@@ -152,7 +171,8 @@ export function SettingsView(): ReactElement {
                     setEqPreset(cur);
                   }
                 }}
-                style={selectStyle}
+                className="select-base"
+                style={{ maxWidth: 280 }}
               >
                 {EQ_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
@@ -162,7 +182,7 @@ export function SettingsView(): ReactElement {
               </select>
             </label>
 
-            <label style={{ fontSize: 14, color: "#ddd", display: "flex", flexDirection: "column", gap: 6 }}>
+            <label style={{ fontSize: 14, color: "var(--text-secondary)", display: "flex", flexDirection: "column", gap: 6 }}>
               Default playback speed
               <input
                 type="number"
@@ -176,11 +196,12 @@ export function SettingsView(): ReactElement {
                   setDefaultSpeed(c);
                   void invoke(IPC_CHANNELS.settings.SAVE_DEFAULT_SPEED, c);
                 }}
-                style={selectStyle}
+                className="input-base"
+                style={{ maxWidth: 280 }}
               />
             </label>
 
-            <label style={{ fontSize: 14, color: "#ddd", display: "flex", flexDirection: "column", gap: 6 }}>
+            <label style={{ fontSize: 14, color: "var(--text-secondary)", display: "flex", flexDirection: "column", gap: 6 }}>
               Sleep timer default
               <select
                 value={sleepDefault}
@@ -189,7 +210,8 @@ export function SettingsView(): ReactElement {
                   setSleepDefault(v);
                   void invoke(IPC_CHANNELS.settings.SAVE_SLEEP_TIMER_DEFAULT, v);
                 }}
-                style={selectStyle}
+                className="select-base"
+                style={{ maxWidth: 280 }}
               >
                 {SLEEP_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
@@ -198,22 +220,88 @@ export function SettingsView(): ReactElement {
                 ))}
               </select>
             </label>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div className="section-label">Torrent Proxy</div>
+              <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text-primary)" }}>
+                SOCKS5 Proxy (for VPN/firewall bypass)
+              </div>
+              <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: 0, lineHeight: 1.5 }}>
+                Use with a VPN&apos;s SOCKS5 proxy to bypass ISP port blocking.
+              </p>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                <label style={{ fontSize: 14, color: "var(--text-secondary)", display: "flex", flexDirection: "column", gap: 6, flex: "1 1 140px" }}>
+                  Host
+                  <input
+                    type="text"
+                    placeholder="127.0.0.1"
+                    value={torrentProxyHost}
+                    onChange={(e) => setTorrentProxyHost(e.target.value)}
+                    className="input-base"
+                    autoComplete="off"
+                  />
+                </label>
+                <label style={{ fontSize: 14, color: "var(--text-secondary)", display: "flex", flexDirection: "column", gap: 6, width: 120 }}>
+                  Port
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="1080"
+                    value={torrentProxyPort}
+                    onChange={(e) => setTorrentProxyPort(e.target.value)}
+                    className="input-base"
+                    autoComplete="off"
+                  />
+                </label>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={async () => {
+                    const port = Number(torrentProxyPort);
+                    const res = await invoke<{ ok: boolean }>(IPC_CHANNELS.settings.SETTINGS_SAVE_TORRENT_PROXY, {
+                      host: torrentProxyHost.trim(),
+                      port,
+                    });
+                    if (!res.ok) {
+                      const cur = await invoke<{ host: string; port: number } | null>(
+                        IPC_CHANNELS.settings.SETTINGS_GET_TORRENT_PROXY,
+                      );
+                      if (cur) {
+                        setTorrentProxyHost(cur.host);
+                        setTorrentProxyPort(String(cur.port));
+                      }
+                    }
+                  }}
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  className="btn-danger"
+                  onClick={async () => {
+                    await invoke(IPC_CHANNELS.settings.SETTINGS_SAVE_TORRENT_PROXY, null);
+                    setTorrentProxyHost("");
+                    setTorrentProxyPort("");
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+              <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
+                Restart Spire after changing proxy settings.
+              </p>
+            </div>
           </div>
         </section>
 
         <section id="section-library" style={{ marginBottom: 32 }}>
-          <h2 style={{ marginTop: 0, fontSize: 18, color: "#f4f4f4" }}>Library</h2>
+          <h2 style={sectionHeader}>Library</h2>
           <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 560 }}>
-            <div
-              style={{
-                padding: 14,
-                borderRadius: 10,
-                border: "1px solid #2a2a2a",
-                background: "#141414",
-              }}
-            >
-              <div style={{ fontSize: 13, color: "#888", marginBottom: 8 }}>Watch folder</div>
-              <div style={{ fontSize: 13, color: "#ccc", wordBreak: "break-all", marginBottom: 12 }}>
+            <div className="card-panel">
+              <div className="section-label">Watch folder</div>
+              <div style={{ fontSize: 13, color: "var(--text-secondary)", wordBreak: "break-all", marginBottom: 12 }}>
                 {watchPath === undefined ? "Loading…" : watchPath ?? "None"}
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -226,7 +314,7 @@ export function SettingsView(): ReactElement {
                       .then((p) => setWatchPath(p))
                       .finally(() => setLibBusy(false));
                   }}
-                  style={pillBtn(false)}
+                  className="btn-secondary"
                 >
                   Change…
                 </button>
@@ -239,14 +327,14 @@ export function SettingsView(): ReactElement {
                       .then(() => setWatchPath(null))
                       .finally(() => setLibBusy(false));
                   }}
-                  style={pillBtn(true)}
+                  className="btn-danger"
                 >
                   Clear
                 </button>
               </div>
             </div>
 
-            <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14, color: "#ddd" }}>
+            <label className="checkbox-control" style={{ fontSize: 14 }}>
               <input
                 type="checkbox"
                 checked={autoFetchCovers}
@@ -255,18 +343,20 @@ export function SettingsView(): ReactElement {
                   setAutoFetchCovers(v);
                   void invoke(IPC_CHANNELS.settings.SAVE_AUTO_FETCH_COVERS, v);
                 }}
+                className="checkbox-input"
               />
+              <span className="checkbox-box" />
               Automatically fetch missing cover art when adding books
             </label>
 
             <div
               style={{
                 padding: 12,
-                borderRadius: 8,
-                background: "#161616",
-                border: "1px solid #262626",
+                borderRadius: "var(--radius-md)",
+                background: "var(--bg-surface)",
+                border: "1px solid var(--border-subtle)",
                 fontSize: 13,
-                color: "#999",
+                color: "var(--text-muted)",
                 lineHeight: 1.5,
               }}
             >
@@ -277,27 +367,27 @@ export function SettingsView(): ReactElement {
         </section>
 
         <section id="section-shortcuts" style={{ marginBottom: 32 }}>
-          <h2 style={{ marginTop: 0, fontSize: 18, color: "#f4f4f4" }}>Shortcuts</h2>
+          <h2 style={sectionHeader}>Shortcuts</h2>
           <ShortcutConfigurator />
         </section>
 
         <section id="section-about" style={{ marginBottom: 48 }}>
-          <h2 style={{ marginTop: 0, fontSize: 18, color: "#f4f4f4" }}>About</h2>
-          <div style={{ fontSize: 14, color: "#ccc", lineHeight: 1.6 }}>
+          <h2 style={sectionHeader}>About</h2>
+          <div style={{ fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.6 }}>
             <p style={{ marginTop: 0 }}>
-              <strong style={{ color: "#fff" }}>Spire</strong>
+              <strong style={{ color: "var(--text-primary)" }}>Spire</strong>
             </p>
             <p>
               Version {appInfo?.version ?? "…"} ({appInfo?.platform ?? "…"})
             </p>
             <p>License: MIT</p>
             <p>
-              <a href="https://github.com/TitaniumKnight1/Spire" style={{ color: "#7eb8ff" }}>
+              <a href="https://github.com/TitaniumKnight1/Spire" style={{ color: "var(--accent)" }}>
                 GitHub
               </a>
             </p>
             <p>
-              <a href="https://ko-fi.com" style={{ color: "#7eb8ff" }}>
+              <a href="https://ko-fi.com" style={{ color: "var(--accent)" }}>
                 Ko-fi (link coming soon)
               </a>
             </p>
@@ -308,23 +398,12 @@ export function SettingsView(): ReactElement {
   );
 }
 
-const selectStyle: CSSProperties = {
-  maxWidth: 280,
-  padding: "8px 10px",
-  borderRadius: 8,
-  border: "1px solid #333",
-  background: "#1a1a1a",
-  color: "#eee",
+const sectionHeader = {
+  marginTop: 0,
+  marginBottom: 20,
+  fontSize: 16,
+  fontWeight: 600,
+  letterSpacing: "-0.01em",
+  borderBottom: "1px solid var(--border-subtle)",
+  paddingBottom: 12,
 };
-
-function pillBtn(danger: boolean): CSSProperties {
-  return {
-    padding: "8px 14px",
-    borderRadius: 8,
-    border: danger ? "1px solid #522" : "1px solid #333",
-    background: danger ? "#301818" : "#1e1e1e",
-    color: danger ? "#e88" : "#e8e8e8",
-    cursor: "pointer",
-    fontSize: 13,
-  };
-}

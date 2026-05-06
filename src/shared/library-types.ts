@@ -45,6 +45,10 @@ export type BookFileItem = {
   file_path: string;
   track_order: number | null;
   duration: number | null;
+  /** Main-resolved playback URL (renderer never builds this manually). */
+  playback_url: string | null;
+  /** Set when `file_path` does not exist on disk after canonical resolution. */
+  file_error: string | null;
 };
 
 export type BookChapterItem = {
@@ -234,7 +238,12 @@ export type DownloadItem = {
   book_id: number | null;
   started_at: string | null;
   completed_at: string | null;
+  /** Persisted label from main DB (`downloads.display_name`). */
   display_name: string | null;
+  /** Live title from progress (e.g. aria2 `bittorrent.info.name`); prefer for queue chrome while downloading. */
+  displayName: string | null;
+  /** Original magnet / URL / file path for UI fallback when no name is known. */
+  source_url: string | null;
   speed_bps: number;
   eta_seconds: number | null;
   /** Present when status is failed after URL / yt-dlp errors */
@@ -242,14 +251,26 @@ export type DownloadItem = {
 };
 
 /** Main → renderer pushed payload (no filesystem paths). */
-export type TorrentProgress = {
+export type DownloadProgressPush = {
   id: number;
+  /** Resolved row label for progress bar (DB display_name or torrent name or placeholder). */
   name: string;
+  /** Torrent display name from metadata when known (aria2 `bittorrent.info.name`); omit for HTTP/yt-dlp. */
+  torrentName?: string | null;
   progress_pct: number;
   speed: number;
   status: string;
   eta: number | null;
 };
+
+/** Main → renderer when a URL / torrent / HTTP download finishes successfully. */
+export type DownloadCompletedPush = {
+  downloadId: number;
+  bookId: number;
+};
+
+/** @deprecated Use {@link DownloadProgressPush} — kept for renderer hook typing. */
+export type TorrentProgress = DownloadProgressPush;
 
 /** Parsed RSS/Atom episode for IPC (not persisted). */
 export type RssEpisode = {
