@@ -18,6 +18,9 @@ A lightweight, open-source audiobook and podcast player for Windows.
 - **Progress tracking and bookmarks**
 - **Lightweight** — no cloud, no account, all local
 
+## Roadmap
+Track what's coming and vote on features: [github.com/users/TitaniumKnight1/projects/2](https://github.com/users/TitaniumKnight1/projects/2)
+
 ## Download
 
 Windows installer builds are published on [GitHub Releases](https://github.com/USERNAME/spire/releases).
