@@ -48,6 +48,8 @@ export function useDownloads(): {
   getSavedFeeds: () => Promise<SavedPodcastFeed[]>;
   deleteSavedFeed: (id: number) => Promise<void>;
   downloadEpisode: (args: { url: string; title: string | null }) => Promise<{ downloadId: number }>;
+  /** Permanently remove completed/cancelled history rows (by download id). */
+  clearDownloadHistory: (ids: number[]) => Promise<{ deleted: number }>;
 } {
   const invoke = useIPC().invoke;
   const subscribe = useIPC().subscribe;
@@ -159,6 +161,15 @@ export function useDownloads(): {
     [invoke, refreshDownloads],
   );
 
+  const clearDownloadHistory = useCallback(
+    async (ids: number[]) => {
+      const res = await invoke<{ deleted: number }>(IPC_CHANNELS.downloads.DELETE_HISTORY, ids);
+      await refreshDownloads();
+      return res;
+    },
+    [invoke, refreshDownloads],
+  );
+
   return {
     downloads,
     isLoading,
@@ -170,5 +181,6 @@ export function useDownloads(): {
     getSavedFeeds,
     deleteSavedFeed,
     downloadEpisode,
+    clearDownloadHistory,
   };
 }

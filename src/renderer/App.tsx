@@ -297,7 +297,7 @@ function Outlet({
           retry={downloadsApi.retry}
         />
         <div style={{ borderTop: "1px solid var(--border-subtle)", margin: "24px 0" }} />
-        <DownloadHistory switchToLibrary={onSwitchToLibrary} />
+        <DownloadHistory switchToLibrary={onSwitchToLibrary} clearDownloadHistory={downloadsApi.clearDownloadHistory} />
       </div>
     );
   }

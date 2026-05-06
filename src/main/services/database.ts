@@ -757,6 +757,25 @@ export function getDownloadById(id: number): DownloadRow | undefined {
   return db.prepare(`SELECT * FROM downloads WHERE id = ?`).get(id) as DownloadRow | undefined;
 }
 
+/** Deletes download rows that are finished history only (completed or cancelled). Returns ids that were removed. */
+export function deleteDownloadHistoryByIds(ids: number[]): number[] {
+  const db = getDatabase();
+  const unique = [...new Set(ids.map((n) => Math.floor(Number(n))).filter((id) => Number.isFinite(id) && id > 0))];
+  if (unique.length === 0) {
+    return [];
+  }
+  const stmt = db.prepare(
+    `DELETE FROM downloads WHERE id = ? AND status IN ('completed', 'cancelled')`,
+  );
+  const deletedIds: number[] = [];
+  for (const id of unique) {
+    if (stmt.run(id).changes > 0) {
+      deletedIds.push(id);
+    }
+  }
+  return deletedIds;
+}
+
 export function getAppSetting(key: string): string | null {
   const db = getDatabase();
   const row = db.prepare(`SELECT value FROM settings WHERE key = ?`).get(key) as { value: string } | undefined;

@@ -9,6 +9,7 @@ import type {
   SavedPodcastFeed,
 } from "../../shared/library-types.js";
 import {
+  deleteDownloadHistoryByIds,
   deletePodcastFeed,
   getAllDownloads,
   getDownloadById,
@@ -207,6 +208,28 @@ export function registerDownloadsIpc(): void {
 
   ipcMain.handle(IPC_CHANNELS.downloads.GET_ALL, async (): Promise<DownloadItem[]> => {
     return getAllDownloads().map(rowToDownloadItem);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.downloads.DELETE_HISTORY, async (_event, rawIds: unknown): Promise<{ deleted: number }> => {
+    const list = Array.isArray(rawIds) ? rawIds : [];
+    const ids = list
+      .map((x) => (typeof x === "number" ? x : Number(x)))
+      .filter((n) => Number.isFinite(n) && n > 0) as number[];
+    if (ids.length === 0) {
+      return { deleted: 0 };
+    }
+    const removedIds = deleteDownloadHistoryByIds(ids);
+    for (const id of removedIds) {
+      const dir = stagingDirForDownload(id);
+      if (fs.existsSync(dir)) {
+        try {
+          fs.rmSync(dir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    return { deleted: removedIds.length };
   });
 
   ipcMain.handle(IPC_CHANNELS.rss.FETCH_FEED, async (_event, feedUrl: unknown) => {

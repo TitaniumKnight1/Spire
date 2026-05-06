@@ -29,6 +29,8 @@ export const IPC_CHANNELS = {
     CANCEL: "spire:downloads:cancel",
     RETRY: "spire:downloads:retry",
     GET_ALL: "spire:downloads:get-all",
+    /** Remove finished rows from DB (completed / cancelled only). Arg: numeric ids. */
+    DELETE_HISTORY: "spire:downloads:delete-history",
     /** Main → renderer (not invoke). */
     PROGRESS_UPDATE: "spire:downloads:progress-update",
     /** Main → renderer (not invoke). */
@@ -125,6 +127,7 @@ export const IPC_INVOKE_CHANNELS = [
   IPC_CHANNELS.downloads.CANCEL,
   IPC_CHANNELS.downloads.RETRY,
   IPC_CHANNELS.downloads.GET_ALL,
+  IPC_CHANNELS.downloads.DELETE_HISTORY,
   IPC_CHANNELS.rss.FETCH_FEED,
   IPC_CHANNELS.rss.SAVE_FEED,
   IPC_CHANNELS.rss.GET_FEEDS,

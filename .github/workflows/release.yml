@@ -119,6 +119,18 @@ jobs:
         if: env.SKIP != 'true'
         run: npm ci
 
+      # electron-builder uses package.json "version" for installer names, blockmap, and latest.yml.
+      # The tag above is computed from commits; without this step artifacts stay on the repo's package.json version.
+      - name: Sync package.json version to release tag
+        if: env.SKIP != 'true'
+        shell: pwsh
+        run: |
+          $raw = $env:NEW_VERSION
+          if ([string]::IsNullOrWhiteSpace($raw)) { throw "NEW_VERSION is empty" }
+          $semver = $raw.TrimStart('v')
+          npm pkg set "version=$semver"
+          Write-Host "Set package.json version to $semver (release tag $raw)"
+
       - name: Build
         if: env.SKIP != 'true'
         run: npm run build
