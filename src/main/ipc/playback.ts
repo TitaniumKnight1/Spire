@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ipcMain } from "electron";
-import { broadcastPlaybackChannel, broadcastPlayerState } from "../broadcast-state.js";
+import { broadcastLibraryUpdated, broadcastPlaybackChannel, broadcastPlayerState } from "../broadcast-state.js";
 import { IPC_CHANNELS } from "../../shared/ipc-channels.js";
 import type { Bookmark, PlayerStatePushPayload } from "../../shared/library-types.js";
 import {
@@ -24,6 +24,18 @@ type SaveProgressPayload = {
   position_seconds: unknown;
   playback_speed: unknown;
 };
+
+/** Avoid hammering GET_ALL on progress ticks; always flush immediately when status changes. */
+let lastProgressLibraryBroadcastAt = 0;
+const PROGRESS_LIBRARY_BROADCAST_MIN_MS = 3500;
+
+function notifyPlaybackLibraryRefresh(bookId: number, urgent: boolean): void {
+  const now = Date.now();
+  if (urgent || now - lastProgressLibraryBroadcastAt >= PROGRESS_LIBRARY_BROADCAST_MIN_MS) {
+    lastProgressLibraryBroadcastAt = now;
+    broadcastLibraryUpdated({ bookIds: [bookId] });
+  }
+}
 
 function asFiniteNumber(v: unknown): number | null {
   if (typeof v === "number" && Number.isFinite(v)) {
@@ -264,11 +276,13 @@ export function registerPlaybackIpc(deps: PlaybackIpcDeps): void {
           })();
     const position = asFiniteNumber(p.position_seconds) ?? 0;
     const speed = asFiniteNumber(p.playback_speed) ?? 1;
+    const bookBefore = getBookById(bookId);
     savePlaybackProgress(bookId, currentFileId, Math.max(0, position), speed);
-    const book = getBookById(bookId);
-    if (book && book.status === "unstarted") {
-      updateBookStatus(bookId, "in-progress");
+    let statusChanged = false;
+    if (bookBefore?.status === "unstarted") {
+      statusChanged = updateBookStatus(bookId, "in-progress");
     }
+    notifyPlaybackLibraryRefresh(bookId, statusChanged);
     return { ok: true };
   });
 
@@ -279,6 +293,7 @@ export function registerPlaybackIpc(deps: PlaybackIpcDeps): void {
     }
     markBookPlaybackComplete(id);
     updateBookStatus(id, "finished");
+    notifyPlaybackLibraryRefresh(id, true);
     return { ok: true };
   });
 

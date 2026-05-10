@@ -467,6 +467,22 @@ export function getProgressByBook(bookId: number): ProgressRow | undefined {
   return db.prepare(`SELECT * FROM progress WHERE book_id = ?`).get(bookId) as ProgressRow | undefined;
 }
 
+/** Most recently listened book (by `progress.last_listened_at`), or null if none. */
+export function getLastListenedBookId(): number | null {
+  const db = getDatabase();
+  const row = db
+    .prepare(
+      `SELECT p.book_id AS id
+       FROM progress p
+       INNER JOIN books b ON b.id = p.book_id
+       WHERE p.last_listened_at IS NOT NULL AND trim(p.last_listened_at) != ''
+       ORDER BY datetime(p.last_listened_at) DESC
+       LIMIT 1`,
+    )
+    .get() as { id: number } | undefined;
+  return row?.id ?? null;
+}
+
 export function deleteBook(id: number): void {
   const db = getDatabase();
   db.prepare(`DELETE FROM downloads WHERE book_id = ?`).run(id);
@@ -479,6 +495,41 @@ export function filePathExists(filePath: string): boolean {
     | { ok: number }
     | undefined;
   return row !== undefined;
+}
+
+/** Resolve a `files` row by stored path (exact, normalized, or case-insensitive on Windows). */
+export function findFileRowByPath(filePath: string): { id: number; book_id: number } | null {
+  const db = getDatabase();
+  const norm = path.normalize(filePath);
+  const tryOne = (p: string): { id: number; book_id: number } | undefined =>
+    db.prepare(`SELECT id, book_id FROM files WHERE file_path = ? LIMIT 1`).get(p) as { id: number; book_id: number } | undefined;
+  const exact = tryOne(filePath) ?? tryOne(norm);
+  if (exact) {
+    return exact;
+  }
+  if (process.platform === "win32") {
+    const ci = db
+      .prepare(`SELECT id, book_id FROM files WHERE lower(file_path) = lower(?) LIMIT 1`)
+      .get(norm) as { id: number; book_id: number } | undefined;
+    if (ci) {
+      return ci;
+    }
+  }
+  return null;
+}
+
+/** Delete one library file row; clears bookmarks and progress pointers that reference it. Chapters cascade on `file_id`. */
+export function deleteLibraryFileById(fileId: number): { bookId: number } | null {
+  const db = getDatabase();
+  const row = db.prepare(`SELECT book_id FROM files WHERE id = ?`).get(fileId) as { book_id: number } | undefined;
+  if (!row) {
+    return null;
+  }
+  const bookId = row.book_id;
+  db.prepare(`DELETE FROM bookmarks WHERE file_id = ?`).run(fileId);
+  db.prepare(`UPDATE progress SET current_file_id = NULL WHERE current_file_id = ?`).run(fileId);
+  db.prepare(`DELETE FROM files WHERE id = ?`).run(fileId);
+  return { bookId };
 }
 
 export function listFilePathsWithBookIds(): { book_id: number; file_path: string }[] {

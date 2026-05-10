@@ -17,7 +17,7 @@ export type PlayerStoreState = {
   duration: number;
   isPlaying: boolean;
   speed: number;
-  /** mpv volume 0–100 (UI only; not persisted). */
+  /** mpv volume 0–100 (persisted in app settings). */
   volume: number;
   chapters: Chapter[];
   currentChapterIndex: number;
@@ -53,6 +53,8 @@ export type PlayerStoreState = {
   toggleSkipSilence: () => void;
   setEqPreset: (preset: EqPreset) => void;
   setPlaybackError: (message: string | null) => void;
+  /** Sync list/metadata fields when the library row for the active book changes (keep live playback position). */
+  mergeCurrentBookFromLibrary: (book: BookListItem) => void;
   nextFile: () => void;
   prevFile: () => void;
 };
@@ -114,6 +116,31 @@ export const usePlayerStore = create<PlayerStoreState>((set, get) => ({
   toggleSkipSilence: () => set((s) => ({ skipSilenceEnabled: !s.skipSilenceEnabled })),
   setEqPreset: (preset) => set({ eqPreset: preset }),
   setPlaybackError: (message) => set({ playbackError: message }),
+
+  mergeCurrentBookFromLibrary: (book) =>
+    set((s) => {
+      if (!s.currentBook || s.currentBook.id !== book.id) {
+        return {};
+      }
+      return {
+        currentBook: {
+          ...s.currentBook,
+          title: book.title,
+          author: book.author,
+          narrator: book.narrator,
+          series: book.series,
+          series_order: book.series_order,
+          cover_art_url: book.cover_art_url,
+          description: book.description,
+          status: book.status,
+          tags: book.tags,
+          date_added: book.date_added,
+          total_duration: book.total_duration,
+          completed_at: book.completed_at,
+          progress_percent: book.progress_percent,
+        },
+      };
+    }),
 
   nextFile: () => {
     const { currentFileIndex, files } = get();

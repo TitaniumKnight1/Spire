@@ -1,3 +1,4 @@
+import process from "node:process";
 import { BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from "electron";
 import { IPC_CHANNELS } from "../../shared/ipc-channels.js";
 import type {
@@ -25,6 +26,7 @@ import {
 import {
   getBookById,
   getAppSetting,
+  getLastListenedBookId,
   updateBookMetadata as dbUpdateBookMetadata,
   updateBookStatus,
   updateBookTags,
@@ -96,6 +98,10 @@ export function registerLibraryIpc(): void {
     return getLibrary();
   });
 
+  ipcMain.handle(IPC_CHANNELS.library.GET_LAST_LISTENED_BOOK_ID, async (): Promise<number | null> => {
+    return getLastListenedBookId();
+  });
+
   ipcMain.handle(IPC_CHANNELS.library.GET_BOOK, async (_event, bookId: unknown): Promise<BookDetailPayload | null> => {
     const id = typeof bookId === "number" ? bookId : Number(bookId);
     if (!Number.isFinite(id)) {
@@ -131,8 +137,16 @@ export function registerLibraryIpc(): void {
 
   ipcMain.handle(IPC_CHANNELS.library.OPEN_FILE_DIALOG, async (event): Promise<LibraryOpenDialogResult> => {
     const win = BrowserWindow.fromWebContents(event.sender);
+    /**
+     * Windows/Linux: `openFile` + `openDirectory` together breaks the shell picker (often folder-only
+     * or inconsistent). macOS supports both in one sheet.
+     */
+    const fileDialogProperties =
+      process.platform === "darwin"
+        ? (["openFile", "openDirectory", "multiSelections"] as const)
+        : (["openFile", "multiSelections"] as const);
     const options: OpenDialogOptions = {
-      properties: ["openFile", "openDirectory", "multiSelections"],
+      properties: [...fileDialogProperties],
       filters: [
         {
           name: "Audio Files",
@@ -140,6 +154,21 @@ export function registerLibraryIpc(): void {
         },
         { name: "All Files", extensions: ["*"] },
       ],
+    };
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+    if (result.canceled) {
+      return { canceled: true, paths: [] };
+    }
+    return { canceled: false, paths: result.filePaths };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.library.OPEN_FOLDER_DIALOG, async (event): Promise<LibraryOpenDialogResult> => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const folderDialogProperties =
+      process.platform === "darwin" ? (["openDirectory", "multiSelections"] as const) : (["openDirectory"] as const);
+    const options: OpenDialogOptions = {
+      properties: [...folderDialogProperties],
+      title: "Choose folder to add",
     };
     const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
     if (result.canceled) {

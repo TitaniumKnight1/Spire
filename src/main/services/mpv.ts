@@ -363,7 +363,16 @@ export class MpvService extends EventEmitter {
 
     if (msg.event === "end-file") {
       this.stopTimePosPoll();
-      this.emit("trackEnded");
+      /**
+       * mpv emits `end-file` for *every* file transition: natural EOF, `loadfile` replacing the
+       * current file, playlist jumps, errors, etc. Only `"eof"` means the track actually played
+       * to completion — forwarding other reasons caused spurious `MARK_COMPLETE` / wrong “finished”
+       * status when switching books or reloading media.
+       */
+      const reason = typeof msg.reason === "string" ? msg.reason : "";
+      if (reason === "eof") {
+        this.emit("trackEnded");
+      }
       return;
     }
   }

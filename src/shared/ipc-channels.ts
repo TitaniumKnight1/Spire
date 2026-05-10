@@ -9,6 +9,8 @@ export const IPC_CHANNELS = {
     GET_BOOK: "spire:library:get-book",
     DELETE_BOOK: "spire:library:delete-book",
     OPEN_FILE_DIALOG: "spire:library:open-file-dialog",
+    /** Folder picker for library ingest (Windows/Linux; macOS can use combined OPEN_FILE_DIALOG). */
+    OPEN_FOLDER_DIALOG: "spire:library:open-folder-dialog",
     UPDATE_METADATA: "spire:library:update-metadata",
     FETCH_COVER_ART: "spire:library:fetch-cover-art",
     OPEN_COVER_DIALOG: "spire:library:open-cover-dialog",
@@ -17,6 +19,8 @@ export const IPC_CHANNELS = {
     SET_WATCH_FOLDER: "spire:library:set-watch-folder",
     GET_WATCH_FOLDER: "spire:library:get-watch-folder",
     CLEAR_WATCH_FOLDER: "spire:library:clear-watch-folder",
+    /** Book id with latest `progress.last_listened_at`, for resume UI on launch. */
+    GET_LAST_LISTENED_BOOK_ID: "spire:library:get-last-listened-book-id",
     /** Re-parse all audio files for a book from disk and refresh DB metadata (invoke). */
     REINGEST_BOOK_METADATA: "spire:library:reingest-book-metadata",
     /** Main → renderer: library rows changed (e.g. after torrent ingest + metadata refresh). */
@@ -85,6 +89,8 @@ export const IPC_CHANNELS = {
     SAVE_SKIP_SILENCE: "spire:settings:save-skip-silence",
     GET_EQ_PRESET: "spire:settings:get-eq-preset",
     SET_EQ_PRESET: "spire:settings:set-eq-preset",
+    GET_PLAYBACK_VOLUME: "spire:settings:get-playback-volume",
+    SAVE_PLAYBACK_VOLUME: "spire:settings:save-playback-volume",
     GET_APP_INFO: "spire:settings:get-app-info",
     GET_DEFAULT_SPEED: "spire:settings:get-default-speed",
     SAVE_DEFAULT_SPEED: "spire:settings:save-default-speed",
@@ -112,6 +118,7 @@ export const IPC_INVOKE_CHANNELS = [
   IPC_CHANNELS.library.GET_BOOK,
   IPC_CHANNELS.library.DELETE_BOOK,
   IPC_CHANNELS.library.OPEN_FILE_DIALOG,
+  IPC_CHANNELS.library.OPEN_FOLDER_DIALOG,
   IPC_CHANNELS.library.UPDATE_METADATA,
   IPC_CHANNELS.library.FETCH_COVER_ART,
   IPC_CHANNELS.library.OPEN_COVER_DIALOG,
@@ -120,6 +127,7 @@ export const IPC_INVOKE_CHANNELS = [
   IPC_CHANNELS.library.SET_WATCH_FOLDER,
   IPC_CHANNELS.library.GET_WATCH_FOLDER,
   IPC_CHANNELS.library.CLEAR_WATCH_FOLDER,
+  IPC_CHANNELS.library.GET_LAST_LISTENED_BOOK_ID,
   IPC_CHANNELS.library.REINGEST_BOOK_METADATA,
   IPC_CHANNELS.downloads.ADD_URL,
   IPC_CHANNELS.downloads.PAUSE,
@@ -159,6 +167,8 @@ export const IPC_INVOKE_CHANNELS = [
   IPC_CHANNELS.settings.SAVE_SKIP_SILENCE,
   IPC_CHANNELS.settings.GET_EQ_PRESET,
   IPC_CHANNELS.settings.SET_EQ_PRESET,
+  IPC_CHANNELS.settings.GET_PLAYBACK_VOLUME,
+  IPC_CHANNELS.settings.SAVE_PLAYBACK_VOLUME,
   IPC_CHANNELS.settings.GET_APP_INFO,
   IPC_CHANNELS.settings.GET_DEFAULT_SPEED,
   IPC_CHANNELS.settings.SAVE_DEFAULT_SPEED,

@@ -12,6 +12,7 @@ import type {
 } from "@shared/library-types";
 import { useIPC } from "./useIPC.js";
 import { useLibraryStore } from "../store/libraryStore.js";
+import { usePlayerStore } from "../store/playerStore.js";
 
 export function useLibrary(): {
   books: BookListItem[];
@@ -27,6 +28,7 @@ export function useLibrary(): {
   deleteBook: (id: number) => Promise<LibraryDeleteResult>;
   refreshLibrary: () => Promise<void>;
   openFileDialog: () => Promise<string[]>;
+  openFolderDialog: () => Promise<string[]>;
   openCoverDialog: () => Promise<LibraryOpenCoverDialogResult>;
   updateMetadata: (payload: MetadataUpdate) => Promise<BookListItem | null>;
   updateTags: (payload: LibraryUpdateTagsPayload) => Promise<BookListItem | null>;
@@ -88,6 +90,14 @@ export function useLibrary(): {
     return res.paths;
   }, [invoke]);
 
+  const openFolderDialog = useCallback(async () => {
+    const res = await invoke<{ canceled: boolean; paths: string[] }>(IPC_CHANNELS.library.OPEN_FOLDER_DIALOG);
+    if (res.canceled) {
+      return [];
+    }
+    return res.paths;
+  }, [invoke]);
+
   const openCoverDialog = useCallback(async () => {
     return invoke<LibraryOpenCoverDialogResult>(IPC_CHANNELS.library.OPEN_COVER_DIALOG);
   }, [invoke]);
@@ -141,8 +151,25 @@ export function useLibrary(): {
   }, [invoke]);
 
   useEffect(() => {
-    const unsub = subscribe(IPC_CHANNELS.library.UPDATED, () => {
-      void refreshLibrary();
+    const unsub = subscribe(IPC_CHANNELS.library.UPDATED, (...args: unknown[]) => {
+      void (async () => {
+        await refreshLibrary();
+        const raw = args[0];
+        const bookIds =
+          raw != null && typeof raw === "object" && !Array.isArray(raw) && "bookIds" in raw
+            ? (raw as { bookIds?: unknown }).bookIds
+            : undefined;
+        const ids = Array.isArray(bookIds)
+          ? bookIds.filter((x): x is number => typeof x === "number" && Number.isFinite(x))
+          : [];
+        const cur = usePlayerStore.getState().currentBook;
+        if (cur && ids.includes(cur.id)) {
+          const updated = useLibraryStore.getState().books.find((b) => b.id === cur.id);
+          if (updated) {
+            usePlayerStore.getState().mergeCurrentBookFromLibrary(updated);
+          }
+        }
+      })();
     });
     return unsub;
   }, [subscribe, refreshLibrary]);
@@ -161,6 +188,7 @@ export function useLibrary(): {
     deleteBook,
     refreshLibrary,
     openFileDialog,
+    openFolderDialog,
     openCoverDialog,
     updateMetadata,
     updateTags,

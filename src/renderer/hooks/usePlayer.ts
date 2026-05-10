@@ -26,6 +26,7 @@ import { usePlayerStore } from "../store/playerStore.js";
 import { acceleratorMatchesKeyboard } from "../utils/appShortcuts.js";
 
 const PROGRESS_DEBOUNCE_MS = 5000;
+const VOLUME_PERSIST_DEBOUNCE_MS = 400;
 
 export const SPEED_CYCLE_SEQUENCE = [1, 1.25, 1.5, 1.75, 2, 2.5, 3, 0.75, 0.5] as const;
 
@@ -156,6 +157,8 @@ type UsePlayerCoreApi = {
   clearSleepTimer: () => void;
   toggleSkipSilence: () => Promise<void>;
   setEqPresetAndPersist: (preset: EqPreset) => Promise<void>;
+  /** Updates store, mpv volume, and persists (debounced) to app settings. */
+  setVolumeLevel: (level: number) => void;
 };
 
 function usePlayerCore(): UsePlayerCoreApi {
@@ -191,6 +194,7 @@ function usePlayerCore(): UsePlayerCoreApi {
   const pendingMountRef = useRef(0);
   const lastProgressFlushRef = useRef(0);
   const shortcutsRef = useRef<ShortcutMap | null>(null);
+  const volumePersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const reportPlaybackState = useCallback(async () => {
     const st = usePlayerStore.getState();
@@ -590,6 +594,22 @@ function usePlayerCore(): UsePlayerCoreApi {
     [invoke],
   );
 
+  const setVolumeLevel = useCallback(
+    (level: number) => {
+      usePlayerStore.getState().setVolume(level);
+      audio.setVolume(usePlayerStore.getState().volume);
+      if (volumePersistTimerRef.current != null) {
+        clearTimeout(volumePersistTimerRef.current);
+      }
+      const v = usePlayerStore.getState().volume;
+      volumePersistTimerRef.current = setTimeout(() => {
+        volumePersistTimerRef.current = null;
+        void invoke(IPC_CHANNELS.settings.SAVE_PLAYBACK_VOLUME, v);
+      }, VOLUME_PERSIST_DEBOUNCE_MS);
+    },
+    [audio, invoke],
+  );
+
   useEffect(() => {
     const offCanPlay = audio.on("canplay", () => {
       const st = usePlayerStore.getState();
@@ -664,6 +684,22 @@ function usePlayerCore(): UsePlayerCoreApi {
         void mountFile(next, 0, true);
         return;
       }
+      const pos = audio.getCurrentTime();
+      const reportedDur = audio.getDuration();
+      const dur = reportedDur > 0 ? reportedDur : st.duration;
+      const tol = Math.min(4, Math.max(0.75, dur * 0.02));
+      const nearEnd = dur <= 0 || pos >= dur - tol;
+      if (!nearEnd) {
+        logMediaDebug("usePlayer.ended_ignored_not_near_end", {
+          position: pos,
+          duration: dur,
+          reportedDuration: reportedDur,
+          bookId: st.currentBook?.id ?? null,
+          note: "eof forwarded but playback position not at end — skipping mark-complete",
+        });
+        void reportPlaybackState();
+        return;
+      }
       st.setIsPlaying(false);
       st.setSleepTimer(null);
       void invoke(IPC_CHANNELS.playback.MARK_COMPLETE, st.currentBook?.id);
@@ -676,20 +712,43 @@ function usePlayerCore(): UsePlayerCoreApi {
       offTimeUpdate();
       offEnded();
     };
-  }, [audio, flushProgress, invoke, mountFile, pause, play, reportPlaybackState]);
+  }, [audio, flushProgress, invoke, logMediaDebug, mountFile, pause, play, reportPlaybackState]);
 
   useEffect(() => {
     void (async () => {
-      const [skipSilence, eqPreset, shortcuts] = await Promise.all([
+      const [skipSilence, eqPreset, shortcuts, volume] = await Promise.all([
         invoke<boolean>(IPC_CHANNELS.settings.GET_SKIP_SILENCE),
         invoke<EqPreset>(IPC_CHANNELS.settings.GET_EQ_PRESET),
         invoke<ShortcutMap>(IPC_CHANNELS.settings.GET_SHORTCUTS),
+        invoke<number>(IPC_CHANNELS.settings.GET_PLAYBACK_VOLUME),
       ]);
       usePlayerStore.getState().setSkipSilenceEnabled(skipSilence);
       usePlayerStore.getState().setEqPreset(eqPreset);
+      usePlayerStore.getState().setVolume(volume);
       shortcutsRef.current = shortcuts;
+      const a = audioRef.current;
+      if (a.hasMediaLoaded()) {
+        a.setVolume(volume);
+      }
     })();
   }, [invoke]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const lastId = await invoke<number | null>(IPC_CHANNELS.library.GET_LAST_LISTENED_BOOK_ID);
+      if (cancelled || lastId == null || lastId <= 0) {
+        return;
+      }
+      if (usePlayerStore.getState().currentBook != null) {
+        return;
+      }
+      await loadBook(lastId);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [invoke, loadBook]);
 
   useEffect(() => {
     const off = subscribe(IPC_CHANNELS.playback.CHAPTERS_LOADED, (...args: unknown[]) => {
@@ -798,6 +857,10 @@ function usePlayerCore(): UsePlayerCoreApi {
 
   useEffect(() => {
     return () => {
+      if (volumePersistTimerRef.current != null) {
+        clearTimeout(volumePersistTimerRef.current);
+        volumePersistTimerRef.current = null;
+      }
       void flushProgressRef.current(true);
       audioRef.current.pause();
     };
@@ -836,6 +899,7 @@ function usePlayerCore(): UsePlayerCoreApi {
     clearSleepTimer,
     toggleSkipSilence,
     setEqPresetAndPersist,
+    setVolumeLevel,
   };
 }
 
