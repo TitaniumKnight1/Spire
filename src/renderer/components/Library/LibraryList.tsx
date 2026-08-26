@@ -193,7 +193,7 @@ export function LibraryList({
                 }}
               >
                 {book.cover_art_url ? (
-                  <img src={book.cover_art_url} alt="" style={{ width: 40, height: 40, objectFit: "cover" }} />
+                  <img src={book.cover_art_url} alt="" draggable={false} style={{ width: 40, height: 40, objectFit: "cover" }} />
                 ) : (
                   initials(book.title, book.author)
                 )}

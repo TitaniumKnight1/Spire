@@ -11,6 +11,8 @@ import { getAppSetting, getListeningStats, setAppSetting } from "../services/dat
 export const SETTINGS_KEY_KEYBOARD_SHORTCUTS = "keyboard_shortcuts";
 export const SETTINGS_KEY_SKIP_SILENCE = "skip_silence";
 export const SETTINGS_KEY_EQ_PRESET = "eq_preset";
+/** Integer 0–100, mpv / playback bar volume. */
+export const SETTINGS_KEY_PLAYBACK_VOLUME = "playback_volume";
 export const SETTINGS_KEY_DEFAULT_SPEED = "default_speed";
 export const SETTINGS_KEY_DEFAULT_SLEEP_TIMER = "default_sleep_timer";
 export const SETTINGS_KEY_AUTO_FETCH_COVERS = "auto_fetch_covers";
@@ -86,6 +88,14 @@ function clampDefaultSpeed(raw: unknown): number {
   return Math.round(clamped * 4) / 4;
 }
 
+function clampPlaybackVolume(raw: unknown): number {
+  const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN;
+  if (!Number.isFinite(n)) {
+    return 100;
+  }
+  return Math.min(100, Math.max(0, Math.round(n)));
+}
+
 export type SettingsIpcDeps = {
   onKeyboardShortcutsChanged: () => void;
 };
@@ -140,6 +150,20 @@ export function registerSettingsIpc(deps: SettingsIpcDeps): void {
       return { ok: false };
     }
     setAppSetting(SETTINGS_KEY_EQ_PRESET, s);
+    return { ok: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.settings.GET_PLAYBACK_VOLUME, async (): Promise<number> => {
+    const raw = getAppSetting(SETTINGS_KEY_PLAYBACK_VOLUME);
+    if (raw == null || raw.trim() === "") {
+      return 100;
+    }
+    return clampPlaybackVolume(raw);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.settings.SAVE_PLAYBACK_VOLUME, async (_event, value: unknown): Promise<{ ok: boolean }> => {
+    const v = clampPlaybackVolume(value);
+    setAppSetting(SETTINGS_KEY_PLAYBACK_VOLUME, String(v));
     return { ok: true };
   });
 

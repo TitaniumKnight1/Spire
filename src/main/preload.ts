@@ -8,6 +8,8 @@ function assertInvokeChannel(channel: string): asserts channel is IpcInvokeChann
 }
 
 contextBridge.exposeInMainWorld("electron", {
+  /** Host OS (`process.platform`); use global `process` — sandboxed preload cannot `require("node:process")`. */
+  platform: process.platform,
   getPathForFile(file: File): string {
     return webUtils.getPathForFile(file);
   },

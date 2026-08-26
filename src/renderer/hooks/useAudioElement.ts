@@ -147,6 +147,8 @@ export function useAudioElement(): UseAudioElementReturn {
     if (currentSkipSilence) {
       setSkipSilence(true);
     }
+    const vol = usePlayerStore.getState().volume;
+    void invoke(IPC_CHANNELS.playback.SET_VOLUME, vol).catch(() => {});
   }, [emit, setSkipSilence]);
 
   const loadPlaylist = useCallback(
@@ -167,6 +169,8 @@ export function useAudioElement(): UseAudioElementReturn {
       if (currentSkipSilence) {
         setSkipSilence(true);
       }
+      const vol = usePlayerStore.getState().volume;
+      void invoke(IPC_CHANNELS.playback.SET_VOLUME, vol).catch(() => {});
     },
     [emit, setSkipSilence],
   );

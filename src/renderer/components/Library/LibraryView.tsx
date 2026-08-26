@@ -6,17 +6,36 @@ import { FilterBar } from "./FilterBar.js";
 import { LibraryGrid } from "./LibraryGrid.js";
 import { LibraryList } from "./LibraryList.js";
 
-function collectPathsFromDrop(e: DragEvent): string[] {
+type FileWithOptionalPath = File & { path?: string };
+
+function resolveDroppedFilePath(file: File): string | null {
   const bridge = window.electron?.getPathForFile;
-  if (!bridge || !e.dataTransfer?.files?.length) {
+  if (bridge) {
+    try {
+      const resolved = bridge(file);
+      if (typeof resolved === "string" && resolved.length > 0) {
+        return resolved;
+      }
+    } catch {
+      /* fall through to legacy path */
+    }
+  }
+  const legacy = (file as FileWithOptionalPath).path;
+  if (typeof legacy === "string" && legacy.length > 0) {
+    return legacy;
+  }
+  return null;
+}
+
+function collectPathsFromDrop(e: DragEvent): string[] {
+  if (!e.dataTransfer?.files?.length) {
     return [];
   }
   const out: string[] = [];
   for (let i = 0; i < e.dataTransfer.files.length; i++) {
-    try {
-      out.push(bridge(e.dataTransfer.files[i]!));
-    } catch {
-      // ignore invalid file handle
+    const p = resolveDroppedFilePath(e.dataTransfer.files[i]!);
+    if (p) {
+      out.push(p);
     }
   }
   return out;
@@ -33,6 +52,7 @@ export function LibraryView(): ReactElement {
     addPaths,
     refreshLibrary,
     openFileDialog,
+    openFolderDialog,
   } = useLibrary();
 
   const [dragActive, setDragActive] = useState(false);
@@ -44,12 +64,21 @@ export function LibraryView(): ReactElement {
     void refreshLibrary();
   }, [refreshLibrary]);
 
-  const onBrowse = useCallback(async () => {
+  const onBrowseFiles = useCallback(async () => {
     const paths = await openFileDialog();
     if (paths.length > 0) {
       await addPaths(paths);
     }
   }, [addPaths, openFileDialog]);
+
+  const onBrowseFolder = useCallback(async () => {
+    const paths = await openFolderDialog();
+    if (paths.length > 0) {
+      await addPaths(paths);
+    }
+  }, [addPaths, openFolderDialog]);
+
+  const showAddFolderButton = window.electron?.platform !== "darwin";
 
   const handleDragEnter = useCallback((e: DragEvent) => {
     e.preventDefault();
@@ -79,6 +108,14 @@ export function LibraryView(): ReactElement {
     }
   }, []);
 
+  /** Capture phase: nested controls (filters, cards, images) must not block OS file drops. */
+  const handleDragOverCapture = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = "copy";
+    }
+  }, []);
+
   const handleDrop = useCallback(
     (e: DragEvent) => {
       e.preventDefault();
@@ -86,6 +123,7 @@ export function LibraryView(): ReactElement {
       dragDepth.current = 0;
       setDragActive(false);
       const paths = collectPathsFromDrop(e);
+
       if (paths.length > 0) {
         void addPaths(paths);
       }
@@ -99,6 +137,7 @@ export function LibraryView(): ReactElement {
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
+      onDragOverCapture={handleDragOverCapture}
       onDrop={handleDrop}
     >
       <div
@@ -113,9 +152,14 @@ export function LibraryView(): ReactElement {
       >
         <h1 className="page-title">Library</h1>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
-          <button type="button" onClick={() => void onBrowse()} className="btn-primary">
+          <button type="button" onClick={() => void onBrowseFiles()} className="btn-primary">
             Add Files
           </button>
+          {showAddFolderButton ? (
+            <button type="button" onClick={() => void onBrowseFolder()} className="btn-secondary">
+              Add Folder
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -154,7 +198,7 @@ export function LibraryView(): ReactElement {
             books={filteredBooks}
             groupBySeries={filters.groupBySeries}
             dragActive={dragActive}
-            onBrowse={() => void onBrowse()}
+            onBrowse={() => void onBrowseFiles()}
             onBookClick={(id) => setSelectedBook(id)}
           />
         ) : (
@@ -162,7 +206,7 @@ export function LibraryView(): ReactElement {
             books={filteredBooks}
             groupBySeries={filters.groupBySeries}
             dragActive={dragActive}
-            onBrowse={() => void onBrowse()}
+            onBrowse={() => void onBrowseFiles()}
             onBookClick={(id) => setSelectedBook(id)}
           />
         )}

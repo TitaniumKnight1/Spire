@@ -65,6 +65,7 @@ export function BookCard({
           <img
             src={book.cover_art_url}
             alt=""
+            draggable={false}
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
         ) : (

@@ -25,16 +25,6 @@ export type ParsedAudioMetadata = {
   chapters: ParsedChapter[];
 };
 
-function jsonReplacer(_key: string, value: unknown): unknown {
-  if (value instanceof Buffer) {
-    return `<Buffer len=${value.length}>`;
-  }
-  if (typeof value === "bigint") {
-    return String(value);
-  }
-  return value;
-}
-
 function pickAuthor(common: ICommonTagsResult): string | null {
   if (common.artists && common.artists.length > 0) {
     return common.artists.join(", ");
@@ -544,23 +534,28 @@ function extractMetadataFromPath(filePath: string): { title?: string | null; aut
   }
 }
 
+/**
+ * Some M4B/M4A/MP4 files embed a text chapter track whose `stco`/`stsz` tables do not match what
+ * music-metadata expects (`parseChapterTrack` throws, e.g. "Expected equal chunk-offset-table…").
+ * Tags and duration still parse with `includeChapters: false`, so retry once without chapters.
+ */
+async function parseFileRobust(filePath: string, ext: string): Promise<IAudioMetadata> {
+  const wantsChapters = ext === ".m4b" || ext === ".m4a" || ext === ".mp4";
+  const base = { duration: true, skipCovers: false } as const;
+  if (!wantsChapters) {
+    return parseFile(filePath, { ...base, includeChapters: false });
+  }
+  try {
+    return await parseFile(filePath, { ...base, includeChapters: true });
+  } catch {
+    return await parseFile(filePath, { ...base, includeChapters: false });
+  }
+}
+
 export async function parseAudioFile(filePath: string): Promise<ParsedAudioMetadata> {
   const ext = path.extname(filePath).toLowerCase();
-  const includeChapters = ext === ".m4b" || ext === ".m4a" || ext === ".mp4";
-  const meta = await parseFile(filePath, {
-    duration: true,
-    skipCovers: false,
-    includeChapters,
-  });
+  const meta = await parseFileRobust(filePath, ext);
   const common = meta.common;
-
-  if (process.env.NODE_ENV === "development") {
-    try {
-      console.debug("[spire/metadata] meta.common", JSON.stringify(common, jsonReplacer, 2));
-    } catch {
-      console.debug("[spire/metadata] meta.common (non-serializable)", common);
-    }
-  }
 
   const durationSeconds =
     typeof meta.format.duration === "number" && Number.isFinite(meta.format.duration)

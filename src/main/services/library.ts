@@ -6,7 +6,9 @@ import { SUPPORTED_AUDIO_EXTENSIONS } from "../utils/formats.js";
 import { getCoversDirectory } from "../utils/paths.js";
 import {
   deleteBook as dbDeleteBook,
+  deleteLibraryFileById,
   filePathExists,
+  findFileRowByPath,
   getAllBooksWithProgress,
   getAppSetting,
   getBookById,
@@ -349,6 +351,69 @@ function rowToListItem(
   };
 }
 
+/** `.m4b` is almost always one complete audiobook per file; never merge with another book by parent folder alone. */
+function isStandaloneM4b(filePath: string): boolean {
+  return path.extname(filePath).toLowerCase() === ".m4b";
+}
+
+type IngestClusterResult = { booksAdded: number; bookIds: number[]; newBookIds: number[] };
+
+/**
+ * Standalone `.m4b` ingest skips folder-based merge, but the same path may already exist in
+ * `files` from an earlier mistaken append to another book. Remove that row so ingest can proceed.
+ */
+async function detachStandaloneM4bIfPathAlreadyInLibrary(absNormalizedPath: string): Promise<void> {
+  const row = findFileRowByPath(absNormalizedPath);
+  if (!row) {
+    return;
+  }
+  const deleted = deleteLibraryFileById(row.id);
+  if (!deleted) {
+    return;
+  }
+  const remaining = getFilesByBook(deleted.bookId);
+  if (remaining.length === 0) {
+    dbDeleteBook(deleted.bookId);
+  } else {
+    await reingestBookMetadata(deleted.bookId);
+  }
+}
+
+async function ingestOnePathCluster(
+  parentDir: string,
+  clusterPaths: string[],
+  reuseBookForSameFolder: boolean,
+  errors: string[],
+): Promise<IngestClusterResult> {
+  if (!reuseBookForSameFolder) {
+    for (const p of clusterPaths) {
+      const abs = path.normalize(path.resolve(p));
+      await detachStandaloneM4bIfPathAlreadyInLibrary(abs);
+    }
+  }
+
+  const newPaths = clusterPaths.filter((p) => !filePathExists(p));
+  if (newPaths.length === 0) {
+    return { booksAdded: 0, bookIds: [], newBookIds: [] };
+  }
+
+  const fileIndex = listFilePathsWithBookIds();
+  const existingBookId = reuseBookForSameFolder ? findBookIdForDirectory(parentDir, fileIndex) : null;
+
+  const parsed = await parsePathsWithErrors(newPaths, errors);
+  if (parsed.length === 0) {
+    return { booksAdded: 0, bookIds: [], newBookIds: [] };
+  }
+  const sorted = sortParsedFiles(parsed);
+
+  if (existingBookId != null) {
+    await appendFilesToBook(existingBookId, sorted);
+    return { booksAdded: 0, bookIds: [existingBookId], newBookIds: [] };
+  }
+  const id = await createBookFromParsed(sorted);
+  return { booksAdded: 1, bookIds: [id], newBookIds: [id] };
+}
+
 export async function ingestPaths(paths: string[]): Promise<{
   success: boolean;
   booksAdded: number;
@@ -364,33 +429,26 @@ export async function ingestPaths(paths: string[]): Promise<{
     return { success: true, booksAdded: 0, errors, bookIds, newBookIds };
   }
 
-  const clusters = clusterByParentDir(expanded);
   let booksAdded = 0;
 
+  const m4bPaths = expanded.filter(isStandaloneM4b);
+  const nonM4bPaths = expanded.filter((p) => !isStandaloneM4b(p));
+
+  for (const fp of m4bPaths) {
+    const parentDir = path.dirname(path.normalize(fp));
+    const chunk = await ingestOnePathCluster(parentDir, [fp], false, errors);
+    booksAdded += chunk.booksAdded;
+    bookIds.push(...chunk.bookIds);
+    newBookIds.push(...chunk.newBookIds);
+  }
+
+  const clusters = clusterByParentDir(nonM4bPaths);
+
   for (const [parentDir, clusterPaths] of clusters) {
-    const newPaths = clusterPaths.filter((p) => !filePathExists(p));
-    if (newPaths.length === 0) {
-      continue;
-    }
-
-    const fileIndex = listFilePathsWithBookIds();
-    const existingBookId = findBookIdForDirectory(parentDir, fileIndex);
-
-    const parsed = await parsePathsWithErrors(newPaths, errors);
-    if (parsed.length === 0) {
-      continue;
-    }
-    const sorted = sortParsedFiles(parsed);
-
-    if (existingBookId != null) {
-      await appendFilesToBook(existingBookId, sorted);
-      bookIds.push(existingBookId);
-    } else {
-      const id = await createBookFromParsed(sorted);
-      booksAdded += 1;
-      bookIds.push(id);
-      newBookIds.push(id);
-    }
+    const chunk = await ingestOnePathCluster(parentDir, clusterPaths, true, errors);
+    booksAdded += chunk.booksAdded;
+    bookIds.push(...chunk.bookIds);
+    newBookIds.push(...chunk.newBookIds);
   }
 
   return { success: errors.length === 0, booksAdded, errors, bookIds, newBookIds };

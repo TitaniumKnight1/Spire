@@ -65,6 +65,8 @@ declare global {
   interface Window {
     electron?: {
       ipc: ElectronIpc;
+      /** Same as Node `process.platform` (from preload). */
+      platform?: NodeJS.Platform;
       getPathForFile?: (file: File) => string;
     };
   }

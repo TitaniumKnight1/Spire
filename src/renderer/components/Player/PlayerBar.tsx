@@ -1,13 +1,11 @@
-import { type ChangeEvent, type CSSProperties, type ReactElement, useCallback, useState } from "react";
+import { type ChangeEvent, type CSSProperties, type FormEvent, type ReactElement, useCallback, useState } from "react";
 import type { EqPreset } from "@shared/library-types";
-import { IPC_CHANNELS } from "@shared/ipc-channels";
-import { useIPC } from "../../hooks/useIPC.js";
 import { usePlayer, SPEED_CYCLE_SEQUENCE } from "../../hooks/usePlayer.js";
 import { usePlayerStore } from "../../store/playerStore.js";
 import { formatDuration } from "../../utils/formatDuration.js";
+import { Modal } from "../shared/Modal.js";
 
 export function PlayerBar(): ReactElement | null {
-  const { invoke } = useIPC();
   const {
     togglePlay,
     seekBy,
@@ -20,6 +18,7 @@ export function PlayerBar(): ReactElement | null {
     clearSleepTimer,
     toggleSkipSilence,
     setEqPresetAndPersist,
+    setVolumeLevel,
   } = usePlayer();
 
   const currentBook = usePlayerStore((s) => s.currentBook);
@@ -35,19 +34,13 @@ export function PlayerBar(): ReactElement | null {
 
   const [sleepOpen, setSleepOpen] = useState(false);
   const [eqOpen, setEqOpen] = useState(false);
+  const [bookmarkModalOpen, setBookmarkModalOpen] = useState(false);
+  const [bookmarkNote, setBookmarkNote] = useState("");
 
   const skipSilenceEnabled = usePlayerStore((s) => s.skipSilenceEnabled);
   const eqPreset = usePlayerStore((s) => s.eqPreset);
   const playbackError = usePlayerStore((s) => s.playbackError);
   const volume = usePlayerStore((s) => s.volume);
-
-  const setVolume = useCallback(
-    (level: number) => {
-      void invoke(IPC_CHANNELS.playback.SET_VOLUME, level).catch(() => {});
-      usePlayerStore.getState().setVolume(level);
-    },
-    [invoke],
-  );
 
   const onSeekInput = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
@@ -68,14 +61,27 @@ export function PlayerBar(): ReactElement | null {
     [setEqPresetAndPersist],
   );
 
-  const onBookmark = useCallback(() => {
-    const raw = window.prompt("Bookmark note (optional)", "");
-    if (raw === null) {
-      return;
-    }
-    const note = raw.trim() === "" ? undefined : raw.trim();
-    void addBookmark(note);
-  }, [addBookmark]);
+  const openBookmarkModal = useCallback(() => {
+    setBookmarkNote("");
+    setBookmarkModalOpen(true);
+  }, []);
+
+  const closeBookmarkModal = useCallback(() => {
+    setBookmarkModalOpen(false);
+    setBookmarkNote("");
+  }, []);
+
+  const submitBookmark = useCallback(
+    (e?: FormEvent) => {
+      e?.preventDefault();
+      const trimmed = bookmarkNote.trim();
+      const note = trimmed === "" ? undefined : trimmed;
+      setBookmarkModalOpen(false);
+      setBookmarkNote("");
+      void addBookmark(note);
+    },
+    [addBookmark, bookmarkNote],
+  );
 
   if (!currentBook) {
     return null;
@@ -89,6 +95,7 @@ export function PlayerBar(): ReactElement | null {
     : `${speed.toFixed(2)}x`;
 
   return (
+    <>
     <footer
       style={{
         flexShrink: 0,
@@ -306,7 +313,7 @@ export function PlayerBar(): ReactElement | null {
             max={100}
             step={1}
             value={volume}
-            onChange={(e) => setVolume(Number(e.target.value))}
+            onChange={(e) => setVolumeLevel(Number(e.target.value))}
             style={{
               width: 80,
               verticalAlign: "middle",
@@ -432,7 +439,7 @@ export function PlayerBar(): ReactElement | null {
           ) : null}
         </div>
 
-        <button type="button" onClick={() => void onBookmark()} style={iconBtn} title="Add bookmark">
+        <button type="button" onClick={openBookmarkModal} style={iconBtn} title="Add bookmark">
           Mark
         </button>
         <button
@@ -462,6 +469,41 @@ export function PlayerBar(): ReactElement | null {
       </div>
       </div>
     </footer>
+    <Modal
+      open={bookmarkModalOpen}
+      title="Add bookmark"
+      onClose={closeBookmarkModal}
+      footer={
+        <>
+          <button type="button" className="btn-secondary" onClick={closeBookmarkModal}>
+            Cancel
+          </button>
+          <button type="submit" form="bookmark-note-form" className="btn-primary">
+            Save
+          </button>
+        </>
+      }
+    >
+      <form id="bookmark-note-form" onSubmit={submitBookmark}>
+        <label
+          htmlFor="bookmark-note-input"
+          style={{ display: "block", fontSize: 13, color: "var(--text-secondary)", marginBottom: 8 }}
+        >
+          Note (optional)
+        </label>
+        <input
+          id="bookmark-note-input"
+          className="input-base"
+          type="text"
+          value={bookmarkNote}
+          onChange={(e) => setBookmarkNote(e.target.value)}
+          placeholder="Bookmark note"
+          autoFocus
+          style={{ width: "100%", padding: "8px 10px", boxSizing: "border-box" }}
+        />
+      </form>
+    </Modal>
+    </>
   );
 }
 
